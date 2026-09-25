@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  GROUP_ADMIN
+  COMPANY_ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum EntityStatus {
+  ACTIVE
+  INACTIVE
+}
+
+/// Root organisation of the internal Group application (not a SaaS tenant).
+model Group {
+  id        String    @id @default(cuid())
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  companies Company[]
+}
+
+model Company {
+  id          String       @id @default(cuid())
+  groupId     String
+  name        String
+  code        String?
+  status      EntityStatus @default(ACTIVE)
+  description String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  group      Group       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  directions Direction[]
+  users      User[]
+
+  @@index([groupId])
+  @@index([status])
+  @@unique([groupId, code])
+}
+
+/// Optional organisational level under a Company.
+model Direction {
+  id          String       @id @default(cuid())
+  companyId   String
+  name        String
+  code        String?
+  status      EntityStatus @default(ACTIVE)
+  description String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  users   User[]
+
+  @@index([companyId])
+  @@index([status])
+  @@unique([companyId, code])
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         Role
+  status       UserStatus @default(ACTIVE)
+  companyId    String
+  directionId  String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  direction     Direction?     @relation(fields: [directionId], references: [id], onDelete: SetNull)
+  refreshTokens RefreshToken[]
+
+  @@index([companyId])
+  @@index([directionId])
+  @@index([status])
+  @@index([role])
+}
+
+/// Stores only hashed refresh tokens (never the raw token).
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}

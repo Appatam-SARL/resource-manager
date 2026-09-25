@@ -1,5 +1,40 @@
 {
-	"devDependencies": {
-		"turbo": "^2.11.3"
-	}
+  "name": "resource-manager",
+  "private": true,
+  "packageManager": "pnpm@10.27.0",
+  "scripts": {
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "dev": "turbo run start:dev",
+    "db:generate": "prisma generate --schema=prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema=prisma/schema.prisma",
+    "db:migrate:deploy": "prisma migrate deploy --schema=prisma/schema.prisma",
+    "db:seed": "prisma db seed --schema=prisma/schema.prisma",
+    "db:studio": "prisma studio --schema=prisma/schema.prisma"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.16.2",
+    "argon2": "^0.44.0"
+  },
+  "devDependencies": {
+    "prisma": "^6.16.2",
+    "tsx": "^4.20.5",
+    "turbo": "^2.11.3",
+    "typescript": "^5.9.2"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma",
+    "seed": "tsx prisma/seed.ts"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "argon2",
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild"
+    ]
+  }
 }
