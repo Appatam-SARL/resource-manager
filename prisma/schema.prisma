@@ -24,6 +24,44 @@ enum EntityStatus {
   INACTIVE
 }
 
+enum ResourceStatus {
+  AVAILABLE
+  MAINTENANCE
+  OUT_OF_SERVICE
+}
+
+enum ResourceType {
+  VEHICLE
+  ROOM
+}
+
+enum ReservationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  COMPLETED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  APPROVE
+  REJECT
+  CANCEL
+  LOGIN
+  LOGOUT
+  STATUS_CHANGE
+}
+
+enum NotificationType {
+  RESERVATION_CREATED
+  RESERVATION_APPROVED
+  RESERVATION_REJECTED
+  RESERVATION_CANCELLED
+}
+
 /// Root organisation of the internal Group application (not a SaaS tenant).
 model Group {
   id        String    @id @default(cuid())
@@ -43,9 +81,12 @@ model Company {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
-  group      Group       @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  directions Direction[]
-  users      User[]
+  group         Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  directions    Direction[]
+  users         User[]
+  vehicles      Vehicle[]
+  meetingRooms  MeetingRoom[]
+  reservations  Reservation[]
 
   @@index([groupId])
   @@index([status])
@@ -63,8 +104,9 @@ model Direction {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  users   User[]
+  company      Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  users        User[]
+  reservations Reservation[]
 
   @@index([companyId])
   @@index([status])
@@ -87,6 +129,9 @@ model User {
   company       Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
   direction     Direction?     @relation(fields: [directionId], references: [id], onDelete: SetNull)
   refreshTokens RefreshToken[]
+  reservations  Reservation[]
+  notifications Notification[]
+  auditLogs     AuditLog[]
 
   @@index([companyId])
   @@index([directionId])
@@ -107,4 +152,114 @@ model RefreshToken {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+model Vehicle {
+  id                 String         @id @default(cuid())
+  companyId          String
+  registrationNumber String
+  brand              String
+  model              String
+  seats              Int
+  status             ResourceStatus @default(AVAILABLE)
+  description        String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  company      Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  reservations Reservation[]
+
+  @@unique([companyId, registrationNumber])
+  @@index([companyId])
+  @@index([status])
+}
+
+model MeetingRoom {
+  id          String         @id @default(cuid())
+  companyId   String
+  name        String
+  location    String?
+  capacity    Int
+  status      ResourceStatus @default(AVAILABLE)
+  description String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  company      Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  reservations Reservation[]
+
+  @@index([companyId])
+  @@index([status])
+}
+
+/// Single reservation model for vehicles and rooms (resourceType discriminates).
+model Reservation {
+  id         String            @id @default(cuid())
+  companyId  String
+  userId     String
+  directionId String?
+  resourceType ResourceType
+  vehicleId  String?
+  roomId     String?
+  startAt    DateTime
+  endAt      DateTime
+  destination    String?
+  missionReason  String?
+  passengerCount Int?
+  meetingSubject   String?
+  participantCount Int?
+  comment          String?
+  status           ReservationStatus @default(PENDING)
+  rejectionReason  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Restrict)
+  direction Direction? @relation(fields: [directionId], references: [id], onDelete: SetNull)
+  vehicle   Vehicle?   @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  room      MeetingRoom? @relation(fields: [roomId], references: [id], onDelete: Restrict)
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([directionId])
+  @@index([vehicleId])
+  @@index([roomId])
+  @@index([status])
+  @@index([startAt])
+  @@index([endAt])
+  @@index([companyId, status, startAt])
+}
+
+model Notification {
+  id         String           @id @default(cuid())
+  userId     String
+  type       NotificationType
+  title      String
+  body       String
+  entityType String?
+  entityId   String?
+  readAt     DateTime?
+  createdAt  DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+}
+
+model AuditLog {
+  id        String      @id @default(cuid())
+  userId    String?
+  action    AuditAction
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime    @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
 }
