@@ -8,7 +8,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 import { FadeIn } from '@/components/motion';
 import { colors, spacing } from '@/constants/theme';
 
@@ -18,6 +18,8 @@ type ScreenProps = {
   keyboard?: boolean;
   padded?: boolean;
   animated?: boolean;
+  /** À activer sur les écrans affichés sans barre d'onglets. */
+  bottomInset?: boolean;
   style?: StyleProp<ViewStyle>;
   contentStyle?: StyleProp<ViewStyle>;
 };
@@ -28,9 +30,14 @@ export function Screen({
   keyboard = false,
   padded = true,
   animated = true,
+  bottomInset = false,
   style,
   contentStyle,
 }: ScreenProps) {
+  const edges: Edge[] = bottomInset
+    ? ['top', 'left', 'right', 'bottom']
+    : ['top', 'left', 'right'];
+
   const inner = animated ? <FadeIn style={{ flex: 1 }}>{children}</FadeIn> : children;
 
   const content = scroll ? (
@@ -64,7 +71,7 @@ export function Screen({
   );
 
   return (
-    <SafeAreaView style={[styles.safe, style]} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={[styles.safe, style]} edges={edges}>
       {body}
     </SafeAreaView>
   );

@@ -74,6 +74,14 @@ export type CalendarEvent = {
   resourceType: ResourceType;
   resourceId: string;
   companyId: string;
+  /** "Toyota Corolla" or the room name. */
+  resourceName?: string;
+  /** Registration number or room location. */
+  resourceDetail?: string | null;
+  /** Destination (vehicle) or meeting subject (room). */
+  context?: string | null;
+  userId?: string;
+  requesterName?: string;
 };
 
 export type Group = {
@@ -190,11 +198,15 @@ export type Reservation = {
     registrationNumber: string;
     brand: string;
     model: string;
+    seats?: number;
+    status?: ResourceStatus;
   } | null;
   room?: {
     id: string;
     name: string;
     location: string | null;
+    capacity?: number;
+    status?: ResourceStatus;
   } | null;
 };
 
@@ -242,3 +254,83 @@ export type DashboardSummary = {
 };
 
 export type ListQueryParams = Record<string, string | number | boolean | undefined | null>;
+
+/**
+ * Realtime (Socket.IO namespace `/realtime`) contract.
+ * Must match apps/api/src/modules/realtime/realtime.constants.ts and realtime.types.ts.
+ */
+export type RealtimeReservationEventData = {
+  reservationId: string;
+  companyId: string;
+  directionId: string | null;
+  userId: string;
+  resourceType: ResourceType;
+  resourceId: string;
+  status: ReservationStatus;
+  startAt: string;
+  endAt: string;
+  updatedAt: string;
+};
+
+export type RealtimeResourceEventData = {
+  resourceType: ResourceType;
+  resourceId: string;
+  companyId: string;
+  status: ResourceStatus;
+  updatedAt: string;
+};
+
+export type RealtimeResourceDeletedData = {
+  resourceType: ResourceType;
+  resourceId: string;
+  companyId: string;
+};
+
+export type RealtimeResourceAvailabilityData = {
+  resourceType: ResourceType;
+  resourceId: string;
+  companyId: string;
+  reason: 'STATUS_CHANGED' | 'RESERVATION_CHANGED';
+  resourceStatus: ResourceStatus | null;
+  changedAt: string;
+};
+
+export type RealtimeNotificationData = {
+  notificationId: string;
+  type: string;
+  title: string;
+  body: string;
+  entityType: string | null;
+  entityId: string | null;
+  createdAt: string;
+};
+
+export type RealtimeEventMap = {
+  'reservation.created': RealtimeReservationEventData;
+  'reservation.updated': RealtimeReservationEventData;
+  'reservation.approved': RealtimeReservationEventData;
+  'reservation.rejected': RealtimeReservationEventData;
+  'reservation.cancelled': RealtimeReservationEventData;
+  'reservation.extended': RealtimeReservationEventData;
+  'resource.created': RealtimeResourceEventData;
+  'resource.updated': RealtimeResourceEventData;
+  'resource.deleted': RealtimeResourceDeletedData;
+  'resource.availability.changed': RealtimeResourceAvailabilityData;
+  'notification.created': RealtimeNotificationData;
+};
+
+export type RealtimeEventName = keyof RealtimeEventMap;
+
+export type RealtimeEnvelope<TName extends RealtimeEventName = RealtimeEventName> = {
+  eventId: string;
+  type: TName;
+  timestamp: string;
+  data: RealtimeEventMap[TName];
+};
+
+/** Discriminated union of every envelope, narrowed by `type`. */
+export type RealtimeMessage = {
+  [TName in RealtimeEventName]: RealtimeEnvelope<TName>;
+}[RealtimeEventName];
+
+export type RealtimeErrorCode = 'UNAUTHORIZED' | 'TOO_MANY_CONNECTIONS';

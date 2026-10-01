@@ -16,6 +16,7 @@ import {
   setTokens,
 } from '@/lib/auth-storage';
 import { AppError, mapApiError } from '@/lib/errors';
+import { unregisterDevicePushToken } from '@/lib/notifications';
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -33,6 +34,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const logout = useCallback(async () => {
+    // Needs a valid access token, so it runs before the session is revoked.
+    await unregisterDevicePushToken();
     const refreshToken = await getRefreshToken();
     try {
       if (refreshToken) {

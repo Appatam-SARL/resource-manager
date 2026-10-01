@@ -1,11 +1,25 @@
-import { useQuery } from '@tanstack/react-query';
-import type { ListQueryParams } from '@resource-manager/types';
+import { keepPreviousData, queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { calendarApi } from '@/api/client';
+import { getMonthQueryRange } from '@/features/calendar/lib/calendar';
 
-export function useCalendar(params: ListQueryParams) {
-  return useQuery({
-    queryKey: ['calendar', params],
-    queryFn: () => calendarApi.list(params),
-    enabled: Boolean(params.startDate && params.endDate),
+/** One request per displayed month (full weeks included); filters are applied locally. */
+function calendarMonthQuery(dateInMonth: Date) {
+  const range = getMonthQueryRange(dateInMonth);
+  return queryOptions({
+    queryKey: ['calendar', 'month', range.monthKey],
+    queryFn: ({ signal }) =>
+      calendarApi.list({ startDate: range.startDate, endDate: range.endDate }, signal),
+    staleTime: 60_000,
   });
+}
+
+export function useCalendarMonth(dateInMonth: Date) {
+  return useQuery({ ...calendarMonthQuery(dateInMonth), placeholderData: keepPreviousData });
+}
+
+export function usePrefetchCalendarMonth() {
+  const queryClient = useQueryClient();
+  return (dateInMonth: Date) => {
+    void queryClient.prefetchQuery(calendarMonthQuery(dateInMonth));
+  };
 }

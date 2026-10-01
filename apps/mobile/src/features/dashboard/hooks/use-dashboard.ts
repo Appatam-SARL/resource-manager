@@ -7,10 +7,3 @@ export function useDashboardSummary() {
     queryFn: () => dashboardApi.summary(),
   });
 }
-
-export function useDashboardReservations(limit = 10) {
-  return useQuery({
-    queryKey: ['dashboard', 'reservations', limit],
-    queryFn: () => dashboardApi.reservations(limit),
-  });
-}

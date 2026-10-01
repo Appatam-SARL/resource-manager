@@ -40,6 +40,20 @@ describe('vehicleReservationSchema', () => {
     expect(result.success).toBe(false);
   });
 
+  it('rejette une destination ou un motif vides après trim', () => {
+    expect(vehicleReservationSchema.safeParse({ ...valid, destination: '   ' }).success).toBe(false);
+    expect(vehicleReservationSchema.safeParse({ ...valid, missionReason: ' ' }).success).toBe(false);
+  });
+
+  it('respecte les longueurs maximales du backend', () => {
+    expect(
+      vehicleReservationSchema.safeParse({ ...valid, destination: 'a'.repeat(201) }).success,
+    ).toBe(false);
+    expect(
+      vehicleReservationSchema.safeParse({ ...valid, missionReason: 'a'.repeat(501) }).success,
+    ).toBe(false);
+  });
+
   it('signale un dépassement de places', () => {
     expect(validatePassengerCountAgainstSeats(5, 4)).toMatch(/places/);
     expect(validatePassengerCountAgainstSeats(2, 4)).toBeNull();
@@ -67,6 +81,13 @@ describe('roomReservationSchema', () => {
       endTime: '10:00',
     });
     expect(result.success).toBe(false);
+  });
+
+  it('rejette un objet de réunion vide ou trop long', () => {
+    expect(roomReservationSchema.safeParse({ ...valid, meetingSubject: '  ' }).success).toBe(false);
+    expect(
+      roomReservationSchema.safeParse({ ...valid, meetingSubject: 'a'.repeat(201) }).success,
+    ).toBe(false);
   });
 
   it('signale un dépassement de capacité', () => {

@@ -1,0 +1,227 @@
+# Production deployment on cPanel (manual, protected by the "production" GitHub Environment).
+#
+#   1. checks: commit from main, images built by CI, commit currently live in PREPROD
+#   2. packages the release FROM the validated images (no rebuild)
+#   3. after approval: SSH upload → backup → prisma migrate deploy → atomic switch → restart
+#   4. waits until /api/v1/health and /login report the commit
+#
+# Required GitHub configuration (see docs/devops/production.md):
+#   Repository variables  PREPROD_API_URL, PRODUCTION_API_URL, PRODUCTION_ADMIN_URL
+#   Environment "production" (required reviewers)
+#     secrets    CPANEL_SSH_PRIVATE_KEY, CPANEL_SSH_KNOWN_HOSTS
+#     variables  CPANEL_HOST, CPANEL_USER, CPANEL_SSH_PORT, CPANEL_DEPLOY_ROOT,
+#                CPANEL_API_APP_ROOT, CPANEL_ADMIN_APP_ROOT, CPANEL_NODEVENV_ACTIVATE
+
+name: Deploy PRODUCTION
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: SHA complet (40 caractères) du commit validé en PREPROD
+        required: true
+        type: string
+      skip_preprod_check:
+        description: Ne pas exiger que ce commit soit celui actuellement en PREPROD
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  COMMIT_SHA: ${{ inputs.commit_sha }}
+
+jobs:
+  verify:
+    name: Vérifications avant production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      api_image: ${{ steps.meta.outputs.api_image }}
+      admin_image: ${{ steps.meta.outputs.admin_image }}
+    steps:
+      - name: Validate commit SHA format
+        run: |
+          if ! [[ "$COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::commit_sha doit être un SHA complet de 40 caractères hexadécimaux"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Commit must belong to main
+        run: |
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor "$COMMIT_SHA" origin/main; then
+            echo "::error::Le commit ${COMMIT_SHA::7} n'appartient pas à main : fusionnez dev dans main d'abord"
+            exit 1
+          fi
+
+      - name: Resolve image names
+        id: meta
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          {
+            echo "api_image=ghcr.io/${owner}/resource-manager-api:${COMMIT_SHA}"
+            echo "admin_image=ghcr.io/${owner}/resource-manager-admin:${COMMIT_SHA}"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Images must exist (built only when CI passed)
+        run: |
+          docker buildx imagetools inspect "${{ steps.meta.outputs.api_image }}" > /dev/null
+          docker buildx imagetools inspect "${{ steps.meta.outputs.admin_image }}" > /dev/null
+
+      - name: Commit must be live in PREPROD
+        if: ${{ !inputs.skip_preprod_check }}
+        env:
+          PREPROD_API_URL: ${{ vars.PREPROD_API_URL }}
+        run: |
+          health="$(curl -sS --max-time 15 "${PREPROD_API_URL}/api/v1/health")"
+          if ! printf '%s' "$health" | grep -qF "\"commit\":\"${COMMIT_SHA}\""; then
+            echo "::error::PREPROD ne tourne pas sur ${COMMIT_SHA::7} : déploiement refusé"
+            exit 1
+          fi
+
+  package:
+    name: Archives de release (depuis les images validées)
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull validated images
+        run: |
+          docker pull --quiet "${{ needs.verify.outputs.api_image }}"
+          docker pull --quiet "${{ needs.verify.outputs.admin_image }}"
+
+      - name: Package release
+        env:
+          API_IMAGE: ${{ needs.verify.outputs.api_image }}
+          ADMIN_IMAGE: ${{ needs.verify.outputs.admin_image }}
+        run: bash infrastructure/cpanel/package-release.sh "$COMMIT_SHA" release
+
+      - name: Add server scripts to the release
+        run: cp -r infrastructure/cpanel release/cpanel
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ inputs.commit_sha }}
+          path: release/
+          retention-days: 90
+          if-no-files-found: error
+
+  deploy:
+    name: Déploiement PRODUCTION (cPanel)
+    needs: [verify, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_ADMIN_URL }}
+    env:
+      SSH_TARGET: ${{ vars.CPANEL_USER }}@${{ vars.CPANEL_HOST }}
+      SSH_PORT: ${{ vars.CPANEL_SSH_PORT || '22' }}
+      DEPLOY_ROOT: ${{ vars.CPANEL_DEPLOY_ROOT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          sparse-checkout: infrastructure/scripts
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ inputs.commit_sha }}
+          path: release
+
+      - name: Configure SSH (pinned host key)
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.CPANEL_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.CPANEL_SSH_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_deploy ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host deploy-target
+            HostName ${{ vars.CPANEL_HOST }}
+            User ${{ vars.CPANEL_USER }}
+            Port ${SSH_PORT}
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          EOF
+
+      - name: Upload release
+        run: |
+          # shellcheck disable=SC2029 # expanded on the runner on purpose
+          ssh deploy-target "mkdir -p '${DEPLOY_ROOT}/incoming/${COMMIT_SHA}'"
+          scp -q -r release/. "deploy-target:${DEPLOY_ROOT}/incoming/${COMMIT_SHA}/"
+
+      - name: Install release (backup → migrate deploy → switch → restart)
+        run: |
+          # shellcheck disable=SC2029 # expanded on the runner on purpose
+          ssh deploy-target \
+            "DEPLOY_ROOT='${DEPLOY_ROOT}' \
+             API_APP_ROOT='${{ vars.CPANEL_API_APP_ROOT }}' \
+             ADMIN_APP_ROOT='${{ vars.CPANEL_ADMIN_APP_ROOT }}' \
+             NODEVENV_ACTIVATE='${{ vars.CPANEL_NODEVENV_ACTIVATE }}' \
+             EXPECTED_APP_ENV=production \
+             bash '${DEPLOY_ROOT}/incoming/${COMMIT_SHA}/cpanel/remote/deploy-release.sh' '${COMMIT_SHA}'"
+
+      - name: Wait for the API release
+        env:
+          CHECK_URL: ${{ vars.PRODUCTION_API_URL }}/api/v1/health
+          EXPECTED_COMMIT: ${{ inputs.commit_sha }}
+          REQUIRE_TEXT: '"status":"ok"'
+          TIMEOUT_SECONDS: '300'
+        run: bash infrastructure/scripts/wait-for-release.sh
+
+      - name: Wait for the admin release
+        env:
+          CHECK_URL: ${{ vars.PRODUCTION_ADMIN_URL }}/login
+          EXPECTED_COMMIT: ${{ inputs.commit_sha }}
+          TIMEOUT_SECONDS: '300'
+        run: bash infrastructure/scripts/wait-for-release.sh
+
+      - name: Summary
+        run: |
+          {
+            echo "### PRODUCTION déployée"
+            echo "- Commit : \`${COMMIT_SHA::7}\`"
+            echo "- Sauvegarde pré-déploiement : ${DEPLOY_ROOT}/backups/pre-deploy/"
+            echo "- Rollback : workflow **Rollback PRODUCTION**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/id_deploy

@@ -8,7 +8,6 @@ import {
 import {
   AuditAction,
   EntityStatus,
-  NotificationType,
   Prisma,
   ReservationStatus,
   ResourceStatus,
@@ -25,10 +24,14 @@ import { toPlainJson } from '../../common/utils/to-plain-json.js';
 import { PrismaService } from '../../database/prisma.service.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { AuditService } from '../audit/audit.service.js';
+import { reservationNotificationMessages } from '../notifications/notification-messages.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { REALTIME_EVENTS } from '../realtime/realtime.constants.js';
+import { RealtimeService } from '../realtime/realtime.service.js';
 import type { AvailabilityQueryDto } from './dto/availability-query.dto.js';
 import type { CalendarQueryDto } from './dto/availability-query.dto.js';
 import { CreateReservationDto } from './dto/create-reservation.dto.js';
+import type { ExtendReservationDto } from './dto/extend-reservation.dto.js';
 import { ListReservationsQueryDto } from './dto/list-reservations-query.dto.js';
 import { RejectReservationDto } from './dto/reject-reservation.dto.js';
 import { UpdateReservationDto } from './dto/update-reservation.dto.js';
@@ -37,6 +40,25 @@ const BLOCKING_STATUSES: ReservationStatus[] = [
   ReservationStatus.PENDING,
   ReservationStatus.APPROVED,
 ];
+
+const EXTENDABLE_STATUSES: ReservationStatus[] = [
+  ReservationStatus.PENDING,
+  ReservationStatus.APPROVED,
+];
+
+const MAX_EXTENSION_MS = 24 * 60 * 60 * 1000;
+
+const notificationDateFormatter = new Intl.DateTimeFormat('fr-FR', {
+  timeZone: 'Africa/Abidjan',
+  day: 'numeric',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+function formatNotificationDateTime(date: Date): string {
+  return notificationDateFormatter.format(date);
+}
 
 const reservationSelect = {
   id: true,
@@ -97,6 +119,7 @@ export class ReservationsService {
     private readonly accessScope: AccessScopeService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   async checkAvailability(actor: AuthenticatedUser, query: AvailabilityQueryDto) {
@@ -223,28 +246,42 @@ export class ReservationsService {
         endAt: true,
         destination: true,
         meetingSubject: true,
-        vehicle: { select: { registrationNumber: true } },
-        room: { select: { name: true } },
+        userId: true,
+        user: { select: { firstName: true, lastName: true } },
+        vehicle: { select: { registrationNumber: true, brand: true, model: true } },
+        room: { select: { name: true, location: true } },
       },
       orderBy: { startAt: 'asc' },
     });
 
-    return reservations.map((r) => ({
-      id: r.id,
-      title:
-        r.resourceType === ResourceType.VEHICLE
+    return reservations.map((r) => {
+      const isVehicle = r.resourceType === ResourceType.VEHICLE;
+      return {
+        id: r.id,
+        title: isVehicle
           ? r.vehicle?.registrationNumber ??
             r.destination ??
             'Réservation véhicule'
           : r.room?.name ?? r.meetingSubject ?? 'Réservation salle',
-      start: r.startAt.toISOString(),
-      end: r.endAt.toISOString(),
-      status: r.status,
-      resourceType: r.resourceType,
-      resourceId:
-        r.resourceType === ResourceType.VEHICLE ? r.vehicleId : r.roomId,
-      companyId: r.companyId,
-    }));
+        start: r.startAt.toISOString(),
+        end: r.endAt.toISOString(),
+        status: r.status,
+        resourceType: r.resourceType,
+        resourceId: isVehicle ? r.vehicleId : r.roomId,
+        companyId: r.companyId,
+        resourceName: isVehicle
+          ? r.vehicle
+            ? `${r.vehicle.brand} ${r.vehicle.model}`
+            : 'Véhicule'
+          : r.room?.name ?? 'Salle de réunion',
+        resourceDetail: isVehicle
+          ? r.vehicle?.registrationNumber ?? null
+          : r.room?.location ?? null,
+        context: (isVehicle ? r.destination : r.meetingSubject) ?? null,
+        userId: r.userId,
+        requesterName: `${r.user.firstName} ${r.user.lastName}`.trim(),
+      };
+    });
   }
 
   async findById(id: string, actor: AuthenticatedUser) {
@@ -323,16 +360,20 @@ export class ReservationsService {
       }
     }
 
-    await this.assertNoConflict({
-      resourceType: existing.resourceType,
-      vehicleId: existing.vehicleId,
-      roomId: existing.roomId,
-      startAt,
-      endAt,
-      excludeId: id,
-    });
+    const reservation = await this.withResourceLock(existing, async (tx) => {
+      await this.assertNoConflict(
+        {
+          resourceType: existing.resourceType,
+          vehicleId: existing.vehicleId,
+          roomId: existing.roomId,
+          startAt,
+          endAt,
+          excludeId: id,
+        },
+        tx,
+      );
 
-    const reservation = await this.prisma.reservation.update({
+      return tx.reservation.update({
       where: { id },
       data: {
         startAt,
@@ -357,6 +398,7 @@ export class ReservationsService {
           : {}),
       },
       select: reservationSelect,
+      });
     });
 
     await this.audit.log({
@@ -369,6 +411,12 @@ export class ReservationsService {
         after: toPlainJson(dto),
       },
     });
+
+    this.realtime.publishReservation(
+      REALTIME_EVENTS.RESERVATION_UPDATED,
+      reservation,
+      { availabilityChanged: true },
+    );
 
     return reservation;
   }
@@ -391,11 +439,12 @@ export class ReservationsService {
       excludeId: id,
     });
 
-    const reservation = await this.prisma.reservation.update({
-      where: { id },
-      data: { status: ReservationStatus.APPROVED },
-      select: reservationSelect,
-    });
+    const reservation = await this.transitionStatus(
+      id,
+      [ReservationStatus.PENDING],
+      { status: ReservationStatus.APPROVED },
+      'Cette réservation a déjà été traitée.',
+    );
 
     await this.audit.log({
       userId: actor.id,
@@ -405,10 +454,14 @@ export class ReservationsService {
       metadata: { companyId: existing.companyId },
     });
 
+    this.realtime.publishReservation(
+      REALTIME_EVENTS.RESERVATION_APPROVED,
+      reservation,
+      { availabilityChanged: false },
+    );
+
     await this.notifications.createManyForUsers([existing.userId], {
-      type: NotificationType.RESERVATION_APPROVED,
-      title: 'Réservation approuvée',
-      body: 'Votre demande de réservation a été approuvée.',
+      ...reservationNotificationMessages.approved(),
       entityType: 'Reservation',
       entityId: id,
     });
@@ -436,14 +489,12 @@ export class ReservationsService {
       );
     }
 
-    const reservation = await this.prisma.reservation.update({
-      where: { id },
-      data: {
-        status: ReservationStatus.REJECTED,
-        rejectionReason,
-      },
-      select: reservationSelect,
-    });
+    const reservation = await this.transitionStatus(
+      id,
+      [ReservationStatus.PENDING],
+      { status: ReservationStatus.REJECTED, rejectionReason },
+      'Cette réservation a déjà été traitée.',
+    );
 
     await this.audit.log({
       userId: actor.id,
@@ -453,10 +504,14 @@ export class ReservationsService {
       metadata: { companyId: existing.companyId, rejectionReason },
     });
 
+    this.realtime.publishReservation(
+      REALTIME_EVENTS.RESERVATION_REJECTED,
+      reservation,
+      { availabilityChanged: true },
+    );
+
     await this.notifications.createManyForUsers([existing.userId], {
-      type: NotificationType.RESERVATION_REJECTED,
-      title: 'Réservation rejetée',
-      body: `Votre demande de réservation a été rejetée : ${rejectionReason}`,
+      ...reservationNotificationMessages.rejected(rejectionReason),
       entityType: 'Reservation',
       entityId: id,
     });
@@ -486,11 +541,12 @@ export class ReservationsService {
       );
     }
 
-    const reservation = await this.prisma.reservation.update({
-      where: { id },
-      data: { status: ReservationStatus.CANCELLED },
-      select: reservationSelect,
-    });
+    const reservation = await this.transitionStatus(
+      id,
+      [ReservationStatus.PENDING, ReservationStatus.APPROVED],
+      { status: ReservationStatus.CANCELLED },
+      'Cette réservation a déjà été traitée.',
+    );
 
     await this.audit.log({
       userId: actor.id,
@@ -503,24 +559,192 @@ export class ReservationsService {
       },
     });
 
-    const notifyIds = new Set<string>();
-    if (actor.id !== existing.userId) {
-      notifyIds.add(existing.userId);
-    }
-    const managers = await this.findCompanyApproverIds(existing.companyId);
-    for (const mid of managers) {
-      if (mid !== actor.id) notifyIds.add(mid);
-    }
+    this.realtime.publishReservation(
+      REALTIME_EVENTS.RESERVATION_CANCELLED,
+      reservation,
+      { availabilityChanged: true },
+    );
 
-    await this.notifications.createManyForUsers([...notifyIds], {
-      type: NotificationType.RESERVATION_CANCELLED,
-      title: 'Réservation annulée',
-      body: 'Une réservation a été annulée.',
+    if (actor.id !== existing.userId) {
+      await this.notifications.createManyForUsers([existing.userId], {
+        ...reservationNotificationMessages.cancelledForOwner(),
+        entityType: 'Reservation',
+        entityId: id,
+      });
+    }
+    const approverIds = (
+      await this.findCompanyApproverIds(existing.companyId)
+    ).filter((approverId) => approverId !== actor.id && approverId !== existing.userId);
+    await this.notifications.createManyForUsers(approverIds, {
+      ...reservationNotificationMessages.cancelledForApprovers(),
       entityType: 'Reservation',
       entityId: id,
     });
 
     return reservation;
+  }
+
+  /**
+   * Extends an open reservation: only the additional period [endAt, newEndAt)
+   * is checked for conflicts, the business status is kept unchanged.
+   */
+  async extend(id: string, dto: ExtendReservationDto, actor: AuthenticatedUser) {
+    const existing = await this.findById(id, actor);
+
+    const canExtend =
+      this.accessScope.canModifyOwnReservation(actor, existing.userId) ||
+      this.accessScope.canApproveReservation(actor, existing);
+    if (!canExtend) {
+      throw new ForbiddenException(
+        'Vous n’êtes pas autorisé à prolonger cette réservation.',
+      );
+    }
+
+    if (!EXTENDABLE_STATUSES.includes(existing.status)) {
+      throw new BadRequestException(
+        'Seule une réservation en attente ou approuvée peut être prolongée.',
+      );
+    }
+
+    const now = new Date();
+    if (existing.endAt <= now) {
+      throw new BadRequestException(
+        'Cette réservation est terminée et ne peut plus être prolongée.',
+      );
+    }
+
+    const newEndAt = new Date(dto.newEndAt);
+    if (Number.isNaN(newEndAt.getTime())) {
+      throw new BadRequestException('Dates invalides.');
+    }
+    if (newEndAt <= existing.endAt) {
+      throw new BadRequestException(
+        'La nouvelle heure de fin doit être postérieure à la fin actuelle.',
+      );
+    }
+    if (newEndAt.getTime() - existing.endAt.getTime() > MAX_EXTENSION_MS) {
+      throw new BadRequestException(
+        'Une prolongation ne peut pas dépasser 24 heures.',
+      );
+    }
+
+    const resource = await this.getReservationResourceState(existing);
+    this.assertCompanyActive(resource.companyStatus);
+    this.assertResourceAvailable(resource.status, resource.kindLabel);
+
+    const { count } = await this.withResourceLock(existing, async (tx) => {
+      await this.assertNoConflict(
+        {
+          resourceType: existing.resourceType,
+          vehicleId: existing.vehicleId,
+          roomId: existing.roomId,
+          startAt: existing.endAt,
+          endAt: newEndAt,
+          excludeId: id,
+        },
+        tx,
+      );
+
+      // Guard on the current end and status so concurrent changes cannot be overwritten.
+      return tx.reservation.updateMany({
+        where: {
+          id,
+          status: { in: EXTENDABLE_STATUSES },
+          endAt: existing.endAt,
+        },
+        data: { endAt: newEndAt },
+      });
+    });
+    if (count === 0) {
+      throw new ConflictException(
+        'Cette réservation a été modifiée entre-temps. Actualisez et réessayez.',
+      );
+    }
+    const reservation = await this.prisma.reservation.findUniqueOrThrow({
+      where: { id },
+      select: reservationSelect,
+    });
+
+    await this.audit.log({
+      userId: actor.id,
+      action: AuditAction.UPDATE,
+      entity: 'Reservation',
+      entityId: id,
+      metadata: {
+        operation: 'EXTEND',
+        companyId: existing.companyId,
+        previousEndAt: existing.endAt.toISOString(),
+        newEndAt: newEndAt.toISOString(),
+      },
+    });
+
+    this.realtime.publishReservation(
+      REALTIME_EVENTS.RESERVATION_EXTENDED,
+      reservation,
+      { availabilityChanged: true },
+    );
+
+    const newEndLabel = formatNotificationDateTime(newEndAt);
+    if (actor.id !== existing.userId) {
+      await this.notifications.createManyForUsers([existing.userId], {
+        ...reservationNotificationMessages.extendedForOwner(newEndLabel),
+        entityType: 'Reservation',
+        entityId: id,
+      });
+    }
+    const approverIds = (
+      await this.findCompanyApproverIds(existing.companyId)
+    ).filter((approverId) => approverId !== actor.id && approverId !== existing.userId);
+    await this.notifications.createManyForUsers(approverIds, {
+      ...reservationNotificationMessages.extendedForApprovers(resource.label, newEndLabel),
+      entityType: 'Reservation',
+      entityId: id,
+    });
+
+    return reservation;
+  }
+
+  private async getReservationResourceState(reservation: {
+    resourceType: ResourceType;
+    vehicleId: string | null;
+    roomId: string | null;
+  }): Promise<{
+    status: ResourceStatus;
+    companyStatus: EntityStatus;
+    kindLabel: string;
+    label: string;
+  }> {
+    if (reservation.resourceType === ResourceType.VEHICLE && reservation.vehicleId) {
+      const vehicle = await this.prisma.vehicle.findUnique({
+        where: { id: reservation.vehicleId },
+        select: {
+          status: true,
+          registrationNumber: true,
+          company: { select: { status: true } },
+        },
+      });
+      if (!vehicle) throw new NotFoundException('Véhicule introuvable.');
+      return {
+        status: vehicle.status,
+        companyStatus: vehicle.company.status,
+        kindLabel: 'véhicule',
+        label: `le véhicule ${vehicle.registrationNumber}`,
+      };
+    }
+    if (reservation.resourceType === ResourceType.ROOM && reservation.roomId) {
+      const room = await this.prisma.meetingRoom.findUnique({
+        where: { id: reservation.roomId },
+        select: { status: true, name: true, company: { select: { status: true } } },
+      });
+      if (!room) throw new NotFoundException('Salle de réunion introuvable.');
+      return {
+        status: room.status,
+        companyStatus: room.company.status,
+        kindLabel: 'salle',
+        label: `la salle ${room.name}`,
+      };
+    }
+    throw new BadRequestException('Ressource de la réservation introuvable.');
   }
 
   private async createVehicleReservation(
@@ -567,30 +791,34 @@ export class ReservationsService {
       );
     }
 
-    await this.assertNoConflict({
+    const target = {
       resourceType: ResourceType.VEHICLE,
       vehicleId: vehicle.id,
       roomId: null,
-      startAt,
-      endAt,
-    });
+    };
+    const destination = dto.destination.trim();
+    const missionReason = dto.missionReason.trim();
+    const passengerCount = dto.passengerCount;
+    const reservation = await this.withResourceLock(target, async (tx) => {
+      await this.assertNoConflict({ ...target, startAt, endAt }, tx);
 
-    const reservation = await this.prisma.reservation.create({
-      data: {
-        companyId: vehicle.companyId,
-        userId: actor.id,
-        directionId: actor.directionId,
-        resourceType: ResourceType.VEHICLE,
-        vehicleId: vehicle.id,
-        startAt,
-        endAt,
-        destination: dto.destination.trim(),
-        missionReason: dto.missionReason.trim(),
-        passengerCount: dto.passengerCount,
-        comment: dto.comment?.trim() || null,
-        status: ReservationStatus.PENDING,
-      },
-      select: reservationSelect,
+      return tx.reservation.create({
+        data: {
+          companyId: vehicle.companyId,
+          userId: actor.id,
+          directionId: actor.directionId,
+          resourceType: ResourceType.VEHICLE,
+          vehicleId: vehicle.id,
+          startAt,
+          endAt,
+          destination,
+          missionReason,
+          passengerCount,
+          comment: dto.comment?.trim() || null,
+          status: ReservationStatus.PENDING,
+        },
+        select: reservationSelect,
+      });
     });
 
     await this.audit.log({
@@ -605,13 +833,18 @@ export class ReservationsService {
       },
     });
 
-    await this.notifyCompanyApprovers(vehicle.companyId, {
-      type: NotificationType.RESERVATION_CREATED,
-      title: 'Nouvelle réservation de véhicule',
-      body: `Une demande de réservation a été créée pour le véhicule ${vehicle.registrationNumber}.`,
-      entityType: 'Reservation',
-      entityId: reservation.id,
-    });
+    this.realtime.publishReservation(
+      REALTIME_EVENTS.RESERVATION_CREATED,
+      reservation,
+      { availabilityChanged: true },
+    );
+
+    await this.notifyReservationCreated(
+      actor,
+      vehicle.companyId,
+      reservation.id,
+      `le véhicule ${vehicle.registrationNumber}`,
+    );
 
     return reservation;
   }
@@ -657,29 +890,32 @@ export class ReservationsService {
       );
     }
 
-    await this.assertNoConflict({
+    const target = {
       resourceType: ResourceType.ROOM,
       vehicleId: null,
       roomId: room.id,
-      startAt,
-      endAt,
-    });
+    };
+    const meetingSubject = dto.meetingSubject.trim();
+    const participantCount = dto.participantCount;
+    const reservation = await this.withResourceLock(target, async (tx) => {
+      await this.assertNoConflict({ ...target, startAt, endAt }, tx);
 
-    const reservation = await this.prisma.reservation.create({
-      data: {
-        companyId: room.companyId,
-        userId: actor.id,
-        directionId: actor.directionId,
-        resourceType: ResourceType.ROOM,
-        roomId: room.id,
-        startAt,
-        endAt,
-        meetingSubject: dto.meetingSubject.trim(),
-        participantCount: dto.participantCount,
-        comment: dto.comment?.trim() || null,
-        status: ReservationStatus.PENDING,
-      },
-      select: reservationSelect,
+      return tx.reservation.create({
+        data: {
+          companyId: room.companyId,
+          userId: actor.id,
+          directionId: actor.directionId,
+          resourceType: ResourceType.ROOM,
+          roomId: room.id,
+          startAt,
+          endAt,
+          meetingSubject,
+          participantCount,
+          comment: dto.comment?.trim() || null,
+          status: ReservationStatus.PENDING,
+        },
+        select: reservationSelect,
+      });
     });
 
     await this.audit.log({
@@ -694,13 +930,18 @@ export class ReservationsService {
       },
     });
 
-    await this.notifyCompanyApprovers(room.companyId, {
-      type: NotificationType.RESERVATION_CREATED,
-      title: 'Nouvelle réservation de salle',
-      body: `Une demande de réservation a été créée pour la salle ${room.name}.`,
-      entityType: 'Reservation',
-      entityId: reservation.id,
-    });
+    this.realtime.publishReservation(
+      REALTIME_EVENTS.RESERVATION_CREATED,
+      reservation,
+      { availabilityChanged: true },
+    );
+
+    await this.notifyReservationCreated(
+      actor,
+      room.companyId,
+      reservation.id,
+      `la salle ${room.name}`,
+    );
 
     return reservation;
   }
@@ -783,27 +1024,7 @@ export class ReservationsService {
       userId: string;
     },
   ): void {
-    if (actor.role === Role.GROUP_ADMIN) return;
-    if (actor.role === Role.COMPANY_ADMIN) {
-      if (actor.companyId !== reservation.companyId) {
-        throw new ForbiddenException('Accès refusé à cette réservation.');
-      }
-      return;
-    }
-    if (actor.role === Role.MANAGER) {
-      if (actor.companyId !== reservation.companyId) {
-        throw new ForbiddenException('Accès refusé à cette réservation.');
-      }
-      if (!actor.directionId) return;
-      if (
-        reservation.directionId === actor.directionId ||
-        reservation.userId === actor.id
-      ) {
-        return;
-      }
-      throw new ForbiddenException('Accès refusé à cette réservation.');
-    }
-    if (reservation.userId !== actor.id) {
+    if (!this.accessScope.canViewReservation(actor, reservation)) {
       throw new ForbiddenException('Accès refusé à cette réservation.');
     }
   }
@@ -824,20 +1045,23 @@ export class ReservationsService {
   }
 
   /** Exposed for unit tests — overlap on PENDING/APPROVED only. */
-  async findConflicts(input: {
-    resourceType: ResourceType;
-    vehicleId: string | null;
-    roomId: string | null;
-    startAt: Date;
-    endAt: Date;
-    excludeId?: string;
-  }) {
+  async findConflicts(
+    input: {
+      resourceType: ResourceType;
+      vehicleId: string | null;
+      roomId: string | null;
+      startAt: Date;
+      endAt: Date;
+      excludeId?: string;
+    },
+    client: Prisma.TransactionClient = this.prisma,
+  ) {
     const resourceWhere: Prisma.ReservationWhereInput =
       input.resourceType === ResourceType.VEHICLE
         ? { vehicleId: input.vehicleId! }
         : { roomId: input.roomId! };
 
-    return this.prisma.reservation.findMany({
+    return client.reservation.findMany({
       where: {
         ...resourceWhere,
         status: { in: BLOCKING_STATUSES },
@@ -854,20 +1078,47 @@ export class ReservationsService {
     });
   }
 
-  private async assertNoConflict(input: {
-    resourceType: ResourceType;
-    vehicleId: string | null;
-    roomId: string | null;
-    startAt: Date;
-    endAt: Date;
-    excludeId?: string;
-  }): Promise<void> {
-    const conflicts = await this.findConflicts(input);
+  private async assertNoConflict(
+    input: {
+      resourceType: ResourceType;
+      vehicleId: string | null;
+      roomId: string | null;
+      startAt: Date;
+      endAt: Date;
+      excludeId?: string;
+    },
+    client: Prisma.TransactionClient = this.prisma,
+  ): Promise<void> {
+    const conflicts = await this.findConflicts(input, client);
     if (conflicts.length > 0) {
       throw new ConflictException(
         'La ressource n’est pas disponible sur ce créneau (conflit avec une réservation existante).',
       );
     }
+  }
+
+  /**
+   * Serializes "conflict check + write" per resource with a transaction-scoped
+   * PostgreSQL advisory lock: two concurrent requests on the same resource cannot
+   * both pass the conflict check. The lock is released at commit or rollback.
+   */
+  private async withResourceLock<T>(
+    target: {
+      resourceType: ResourceType;
+      vehicleId: string | null;
+      roomId: string | null;
+    },
+    work: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    const resourceId =
+      target.resourceType === ResourceType.VEHICLE
+        ? target.vehicleId
+        : target.roomId;
+    const lockKey = `reservation:${target.resourceType}:${resourceId ?? ''}`;
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+      return work(tx);
+    });
   }
 
   private async findCompanyApproverIds(companyId: string): Promise<string[]> {
@@ -887,17 +1138,48 @@ export class ReservationsService {
     return users.map((u) => u.id);
   }
 
-  private async notifyCompanyApprovers(
+  private async notifyReservationCreated(
+    actor: AuthenticatedUser,
     companyId: string,
-    payload: {
-      type: NotificationType;
-      title: string;
-      body: string;
-      entityType: string;
-      entityId: string;
-    },
+    reservationId: string,
+    resourceLabel: string,
   ): Promise<void> {
-    const ids = await this.findCompanyApproverIds(companyId);
-    await this.notifications.createManyForUsers(ids, payload);
+    await this.notifications.createManyForUsers([actor.id], {
+      ...reservationNotificationMessages.createdForRequester(),
+      entityType: 'Reservation',
+      entityId: reservationId,
+    });
+
+    const approverIds = (await this.findCompanyApproverIds(companyId)).filter(
+      (approverId) => approverId !== actor.id,
+    );
+    await this.notifications.createManyForUsers(approverIds, {
+      ...reservationNotificationMessages.createdForApprovers(resourceLabel),
+      entityType: 'Reservation',
+      entityId: reservationId,
+    });
+  }
+
+  /**
+   * Atomic status transition: the WHERE on the current status guarantees that
+   * concurrent calls produce a single transition (and a single notification).
+   */
+  private async transitionStatus(
+    id: string,
+    fromStatuses: ReservationStatus[],
+    data: Prisma.ReservationUpdateManyMutationInput,
+    alreadyProcessedMessage: string,
+  ) {
+    const { count } = await this.prisma.reservation.updateMany({
+      where: { id, status: { in: fromStatuses } },
+      data,
+    });
+    if (count === 0) {
+      throw new ConflictException(alreadyProcessedMessage);
+    }
+    return this.prisma.reservation.findUniqueOrThrow({
+      where: { id },
+      select: reservationSelect,
+    });
   }
 }

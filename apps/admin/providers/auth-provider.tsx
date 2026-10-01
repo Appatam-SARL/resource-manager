@@ -63,8 +63,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (cancelled) return;
           if (refreshed) {
             setUser(refreshed.user);
+          } else if (getStoredRefreshToken()) {
+            // Refresh failed for a transient reason (API restarting): keep the session.
+            setUser(stored);
           } else {
-            clearSession();
             setUser(null);
           }
         }

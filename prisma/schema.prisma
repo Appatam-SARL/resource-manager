@@ -55,11 +55,17 @@ enum AuditAction {
   STATUS_CHANGE
 }
 
+enum PushPlatform {
+  ANDROID
+  IOS
+}
+
 enum NotificationType {
   RESERVATION_CREATED
   RESERVATION_APPROVED
   RESERVATION_REJECTED
   RESERVATION_CANCELLED
+  RESERVATION_EXTENDED
 }
 
 /// Root organisation of the internal Group application (not a SaaS tenant).
@@ -131,6 +137,7 @@ model User {
   refreshTokens RefreshToken[]
   reservations  Reservation[]
   notifications Notification[]
+  pushTokens    UserPushToken[]
   auditLogs     AuditLog[]
 
   @@index([companyId])
@@ -246,6 +253,23 @@ model Notification {
 
   @@index([userId, createdAt])
   @@index([userId, readAt])
+}
+
+/// One Expo push token per device; a user may own several active devices.
+model UserPushToken {
+  id         String       @id @default(cuid())
+  userId     String
+  token      String       @unique
+  platform   PushPlatform
+  deviceName String?
+  isActive   Boolean      @default(true)
+  lastUsedAt DateTime     @default(now())
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isActive])
 }
 
 model AuditLog {

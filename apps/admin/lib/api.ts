@@ -1,15 +1,21 @@
-import { createApiClient, type ApiClient } from '@resource-manager/api-client';
+import { ApiError, createApiClient, type ApiClient } from '@resource-manager/api-client';
 import type { AuthTokens, AuthUser } from '@resource-manager/types';
+import { getBrowserRuntimeConfig } from '@/lib/runtime-config';
 
 const ACCESS_KEY = 'rm_admin_access_token';
 const REFRESH_KEY = 'rm_admin_refresh_token';
 const USER_KEY = 'rm_admin_user';
 
+/**
+ * Resolution order: runtime API_PUBLIC_URL (injected by the server) → build-time
+ * NEXT_PUBLIC_API_URL → local API. An empty value means same-origin (reverse proxy on /api).
+ */
 export function getApiBaseUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ||
-    'http://localhost:3000'
-  );
+  const runtimeApiUrl = getBrowserRuntimeConfig()?.apiUrl;
+  if (runtimeApiUrl != null) return runtimeApiUrl;
+  const configured = process.env.NEXT_PUBLIC_API_URL;
+  if (configured === undefined) return 'http://localhost:3000';
+  return configured.trim().replace(/\/$/, '');
 }
 
 export function getStoredAccessToken(): string | null {
@@ -48,6 +54,13 @@ export function clearSession(): void {
     'rm_admin_authenticated=; path=/; max-age=0; SameSite=Lax';
 }
 
+export function isRefreshTokenRejected(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.status === 400 || error.status === 401 || error.status === 403)
+  );
+}
+
 let refreshPromise: Promise<AuthTokens | null> | null = null;
 
 export async function refreshSession(): Promise<AuthTokens | null> {
@@ -61,8 +74,9 @@ export async function refreshSession(): Promise<AuthTokens | null> {
       const tokens = await client.refresh({ refreshToken });
       persistSession(tokens);
       return tokens;
-    } catch {
-      clearSession();
+    } catch (error) {
+      // A network error or a 5xx during a deploy must not log the user out.
+      if (isRefreshTokenRejected(error)) clearSession();
       return null;
     } finally {
       refreshPromise = null;

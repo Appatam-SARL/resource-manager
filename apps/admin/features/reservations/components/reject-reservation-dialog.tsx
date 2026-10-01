@@ -35,6 +35,7 @@ export function RejectReservationDialog({
     resolver: zodResolver(rejectReservationFormSchema),
     defaultValues: { rejectionReason: '' },
   });
+  const error = form.formState.errors.rejectionReason;
 
   return (
     <Dialog
@@ -46,9 +47,9 @@ export function RejectReservationDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Rejeter la réservation</DialogTitle>
+          <DialogTitle>Refuser la réservation</DialogTitle>
           <DialogDescription>
-            Un motif de rejet est obligatoire (3 caractères minimum).
+            Le motif sera communiqué au demandeur. Il est obligatoire.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -58,15 +59,18 @@ export function RejectReservationDialog({
           })}
         >
           <div className="space-y-1.5">
-            <Label htmlFor="rejectionReason">Motif du rejet</Label>
+            <Label htmlFor="rejectionReason">Motif du refus</Label>
             <Textarea
               id="rejectionReason"
               rows={4}
+              placeholder="Ex. : véhicule déjà affecté à une mission prioritaire"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? 'rejectionReason-error' : undefined}
               {...form.register('rejectionReason')}
             />
-            {form.formState.errors.rejectionReason ? (
-              <p className="text-xs text-destructive">
-                {form.formState.errors.rejectionReason.message}
+            {error ? (
+              <p id="rejectionReason-error" className="text-xs text-destructive">
+                {error.message}
               </p>
             ) : null}
           </div>
@@ -77,10 +81,10 @@ export function RejectReservationDialog({
               disabled={loading}
               onClick={() => onOpenChange(false)}
             >
-              Annuler
+              Retour
             </Button>
             <Button type="submit" variant="destructive" disabled={loading}>
-              {loading ? 'Rejet…' : 'Rejeter'}
+              {loading ? 'Refus…' : 'Refuser la demande'}
             </Button>
           </DialogFooter>
         </form>

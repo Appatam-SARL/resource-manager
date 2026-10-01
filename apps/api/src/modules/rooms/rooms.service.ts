@@ -1,5 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { AuditAction, Prisma, ResourceStatus } from '@prisma/client';
+import {
+  AuditAction,
+  Prisma,
+  ResourceStatus,
+  ResourceType,
+} from '@prisma/client';
 import { AccessScopeService } from '../../common/authorization/access-scope.service.js';
 import {
   paginate,
@@ -9,6 +14,7 @@ import { toPlainJson } from '../../common/utils/to-plain-json.js';
 import { PrismaService } from '../../database/prisma.service.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { AuditService } from '../audit/audit.service.js';
+import { RealtimeService } from '../realtime/realtime.service.js';
 import { CreateRoomDto } from './dto/create-room.dto.js';
 import { ListRoomsQueryDto } from './dto/list-rooms-query.dto.js';
 import { UpdateRoomDto } from './dto/update-room.dto.js';
@@ -32,6 +38,7 @@ export class RoomsService {
     private readonly prisma: PrismaService,
     private readonly accessScope: AccessScopeService,
     private readonly audit: AuditService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   async list(actor: AuthenticatedUser, query: ListRoomsQueryDto) {
@@ -101,6 +108,7 @@ export class RoomsService {
       metadata: { companyId: room.companyId, name: room.name },
     });
 
+    this.realtime.publishResourceCreated(ResourceType.ROOM, room);
     return room;
   }
 
@@ -134,6 +142,7 @@ export class RoomsService {
       },
     });
 
+    this.realtime.publishResourceUpdated(ResourceType.ROOM, room);
     return room;
   }
 
@@ -159,6 +168,11 @@ export class RoomsService {
       metadata: { from: existing.status, to: status },
     });
 
+    this.realtime.publishResourceAvailability(
+      ResourceType.ROOM,
+      room,
+      'STATUS_CHANGED',
+    );
     return room;
   }
 
@@ -189,6 +203,11 @@ export class RoomsService {
         },
       });
 
+      this.realtime.publishResourceAvailability(
+        ResourceType.ROOM,
+        room,
+        'STATUS_CHANGED',
+      );
       return {
         deleted: false,
         deactivated: true,
@@ -208,6 +227,7 @@ export class RoomsService {
       metadata: { name: existing.name, companyId: existing.companyId },
     });
 
+    this.realtime.publishResourceDeleted(ResourceType.ROOM, existing);
     return {
       deleted: true,
       deactivated: false,

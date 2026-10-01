@@ -1,26 +1,27 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useForm } from 'react-hook-form';
+import Link from 'next/link';
+import { useForm, type FieldErrors, type UseFormRegister } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { Company } from '@resource-manager/types';
-import { Button } from '@/components/ui/button';
+import { FormField } from '@/components/forms/form-field';
+import { FormActions, FormCard, FormSection } from '@/components/forms/form-layout';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  createCompanySchema,
   updateCompanySchema,
   toCompanyPayload,
-  type CreateCompanyFormValues,
   type UpdateCompanyFormValues,
 } from '@/features/companies/schemas/company-schema';
 
 type CompanyFormCreateProps = {
   mode: 'create';
   groupId: string;
+  groupName?: string;
   onSubmit: (values: ReturnType<typeof toCompanyPayload>) => Promise<void>;
   submitLabel?: string;
+  cancelHref?: string;
 };
 
 type CompanyFormEditProps = {
@@ -28,113 +29,19 @@ type CompanyFormEditProps = {
   company: Company;
   onSubmit: (values: ReturnType<typeof toCompanyPayload>) => Promise<void>;
   submitLabel?: string;
+  cancelHref?: string;
 };
 
 type CompanyFormProps = CompanyFormCreateProps | CompanyFormEditProps;
 
+const EMPTY_VALUES: UpdateCompanyFormValues = { name: '', code: '', description: '' };
+
+function valuesFromCompany(company: Company): UpdateCompanyFormValues {
+  return { name: company.name, code: company.code ?? '', description: company.description ?? '' };
+}
+
 export function CompanyForm(props: CompanyFormProps) {
-  if (props.mode === 'create') {
-    return <CreateCompanyForm {...props} />;
-  }
-  return <EditCompanyForm {...props} />;
-}
-
-function CreateCompanyForm({
-  groupId,
-  onSubmit,
-  submitLabel,
-}: CompanyFormCreateProps) {
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors, isSubmitting },
-  } = useForm<CreateCompanyFormValues>({
-    resolver: zodResolver(createCompanySchema),
-    defaultValues: {
-      groupId,
-      name: '',
-      code: '',
-      description: '',
-    },
-  });
-
-  useEffect(() => {
-    reset({
-      groupId,
-      name: '',
-      code: '',
-      description: '',
-    });
-  }, [groupId, reset]);
-
-  return (
-    <form
-      className="space-y-4"
-      onSubmit={handleSubmit(async (values) => {
-        await onSubmit(
-          toCompanyPayload({
-            groupId: values.groupId,
-            name: values.name,
-            code: values.code,
-            description: values.description,
-          }),
-        );
-      })}
-    >
-      <input type="hidden" {...register('groupId')} />
-      <div className="space-y-2">
-        <Label htmlFor="company-name">Nom</Label>
-        <Input
-          id="company-name"
-          disabled={isSubmitting}
-          aria-invalid={Boolean(errors.name)}
-          {...register('name')}
-        />
-        {errors.name ? (
-          <p className="text-sm text-destructive">{errors.name.message}</p>
-        ) : null}
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="company-code">Code (optionnel)</Label>
-        <Input
-          id="company-code"
-          disabled={isSubmitting}
-          aria-invalid={Boolean(errors.code)}
-          {...register('code')}
-        />
-        {errors.code ? (
-          <p className="text-sm text-destructive">{errors.code.message}</p>
-        ) : null}
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="company-description">Description (optionnelle)</Label>
-        <Textarea
-          id="company-description"
-          disabled={isSubmitting}
-          aria-invalid={Boolean(errors.description)}
-          {...register('description')}
-        />
-        {errors.description ? (
-          <p className="text-sm text-destructive">{errors.description.message}</p>
-        ) : null}
-      </div>
-      <div className="flex justify-end">
-        <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting
-            ? 'Enregistrement…'
-            : (submitLabel ?? 'Créer l’entreprise')}
-        </Button>
-      </div>
-    </form>
-  );
-}
-
-function EditCompanyForm({
-  company,
-  onSubmit,
-  submitLabel,
-}: CompanyFormEditProps) {
+  const isCreate = props.mode === 'create';
   const {
     register,
     handleSubmit,
@@ -142,77 +49,90 @@ function EditCompanyForm({
     formState: { errors, isSubmitting, isDirty },
   } = useForm<UpdateCompanyFormValues>({
     resolver: zodResolver(updateCompanySchema),
-    defaultValues: {
-      name: company.name,
-      code: company.code ?? '',
-      description: company.description ?? '',
-    },
+    defaultValues: isCreate ? EMPTY_VALUES : valuesFromCompany(props.company),
   });
 
-  useEffect(() => {
-    reset({
-      name: company.name,
-      code: company.code ?? '',
-      description: company.description ?? '',
-    });
-  }, [company, reset]);
-
   return (
-    <form
-      className="space-y-4"
-      onSubmit={handleSubmit(async (values) => {
-        await onSubmit(
-          toCompanyPayload({
-            name: values.name,
-            code: values.code,
-            description: values.description,
-          }),
-        );
-      })}
-    >
-      <div className="space-y-2">
-        <Label htmlFor="edit-company-name">Nom</Label>
-        <Input
-          id="edit-company-name"
-          disabled={isSubmitting}
-          aria-invalid={Boolean(errors.name)}
-          {...register('name')}
-        />
-        {errors.name ? (
-          <p className="text-sm text-destructive">{errors.name.message}</p>
+    <FormCard>
+      <form
+        noValidate
+        onSubmit={handleSubmit(async (values) => {
+          try {
+            await props.onSubmit(toCompanyPayload(isCreate ? { ...values, groupId: props.groupId } : values));
+            if (!isCreate) reset(values);
+          } catch {
+            // The page reports the error; keep the user's input.
+          }
+        })}
+      >
+        {isCreate && props.groupName ? (
+          <FormSection title="Rattachement" description="Toute entreprise appartient au groupe.">
+            <FormField label="Groupe" wide>
+              <div className="flex h-9 items-center rounded-lg bg-muted/60 px-3 text-sm text-foreground ring-1 ring-border">
+                {props.groupName}
+              </div>
+            </FormField>
+          </FormSection>
         ) : null}
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="edit-company-code">Code (optionnel)</Label>
-        <Input
-          id="edit-company-code"
-          disabled={isSubmitting}
-          aria-invalid={Boolean(errors.code)}
-          {...register('code')}
-        />
-        {errors.code ? (
-          <p className="text-sm text-destructive">{errors.code.message}</p>
-        ) : null}
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="edit-company-description">
-          Description (optionnelle)
-        </Label>
-        <Textarea
-          id="edit-company-description"
-          disabled={isSubmitting}
-          aria-invalid={Boolean(errors.description)}
-          {...register('description')}
-        />
-        {errors.description ? (
-          <p className="text-sm text-destructive">{errors.description.message}</p>
-        ) : null}
-      </div>
-      <div className="flex justify-end">
-        <Button type="submit" disabled={!isDirty || isSubmitting}>
-          {isSubmitting ? 'Enregistrement…' : (submitLabel ?? 'Enregistrer')}
-        </Button>
-      </div>
-    </form>
+
+        <CompanyIdentityFields register={register} errors={errors} disabled={isSubmitting} idPrefix={props.mode} />
+
+        <FormActions>
+          {props.cancelHref ? (
+            <Link href={props.cancelHref} className={buttonVariants({ variant: 'outline' })}>
+              Annuler
+            </Link>
+          ) : null}
+          <Button type="submit" disabled={isSubmitting || (!isCreate && !isDirty)}>
+            {isSubmitting
+              ? 'Enregistrement…'
+              : (props.submitLabel ?? (isCreate ? 'Créer l’entreprise' : 'Enregistrer les modifications'))}
+          </Button>
+        </FormActions>
+      </form>
+    </FormCard>
+  );
+}
+
+function CompanyIdentityFields({
+  register,
+  errors,
+  disabled,
+  idPrefix,
+}: {
+  register: UseFormRegister<UpdateCompanyFormValues>;
+  errors: FieldErrors<UpdateCompanyFormValues>;
+  disabled: boolean;
+  idPrefix: string;
+}) {
+  return (
+    <>
+      <FormSection title="Identification" description="Nom affiché dans toute l’application et code interne éventuel.">
+        <FormField label="Nom" htmlFor={`${idPrefix}-company-name`} error={errors.name?.message} required>
+          <Input id={`${idPrefix}-company-name`} disabled={disabled} aria-invalid={Boolean(errors.name)} {...register('name')} />
+        </FormField>
+        <FormField label="Code" htmlFor={`${idPrefix}-company-code`} error={errors.code?.message} hint="Optionnel, 32 caractères maximum.">
+          <Input
+            id={`${idPrefix}-company-code`}
+            className="font-mono"
+            disabled={disabled}
+            aria-invalid={Boolean(errors.code)}
+            {...register('code')}
+          />
+        </FormField>
+      </FormSection>
+
+      <FormSection title="Présentation" description="Activité ou périmètre de l’entreprise au sein du groupe.">
+        <FormField label="Description" htmlFor={`${idPrefix}-company-description`} error={errors.description?.message} hint="Optionnelle, 500 caractères maximum." wide>
+          <Textarea
+            id={`${idPrefix}-company-description`}
+            rows={4}
+            disabled={disabled}
+            aria-invalid={Boolean(errors.description)}
+            {...register('description')}
+          />
+        </FormField>
+      </FormSection>
+    </>
   );
 }

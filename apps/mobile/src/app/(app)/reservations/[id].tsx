@@ -1,203 +1,193 @@
-import { useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { format } from 'date-fns';
+import type { Reservation } from '@resource-manager/types';
+import { useAuth } from '@/features/auth/auth-provider';
+import { useNow } from '@/hooks/use-now';
+import { useCancelReservation, useReservation } from '@/features/reservations/hooks/use-reservations';
+import { isOpenStatus } from '@/features/reservations/lib/reservation-list';
 import {
-  useCancelReservation,
-  useReservation,
-} from '@/features/reservations/hooks/use-reservations';
+  canCancelReservation,
+  formatDetailDay,
+  getCancelErrorMessage,
+  getExtensionIneligibility,
+  getReservationTiming,
+} from '@/features/reservations/lib/reservation-detail';
+import { ReservationHeroCard } from '@/features/reservations/components/detail/reservation-hero-card';
+import { ReservationTimeCard } from '@/features/reservations/components/detail/reservation-time-card';
+import { ReservationActions } from '@/features/reservations/components/detail/reservation-actions';
+import { ReservationInfoCard } from '@/features/reservations/components/detail/reservation-info-card';
+import { ReservationHistory } from '@/features/reservations/components/detail/reservation-history';
+import { ExtendReservationSheet } from '@/features/reservations/components/detail/extend-reservation-sheet';
+import {
+  ReservationDetailError,
+  ReservationDetailSkeleton,
+  ReservationNotFound,
+  ReservationStatusNotice,
+  ReservationSuccessBanner,
+} from '@/features/reservations/components/detail/reservation-detail-states';
 import { Screen } from '@/components/ui/Screen';
-import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
+import { AppHeader } from '@/components/layout/app-header';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { ErrorState } from '@/components/ui/ErrorState';
-import { LoadingState } from '@/components/ui/LoadingState';
-import { formatDateTime } from '@/lib/format';
 import { AppError } from '@/lib/errors';
+import { parseApiDate } from '@/lib/format';
 import { colors, spacing } from '@/constants/theme';
+
+const SUCCESS_BANNER_MS = 4_000;
+
+function backToReservations() {
+  router.replace('/(app)/reservations');
+}
 
 export default function ReservationDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { user } = useAuth();
+  const now = useNow(30_000);
   const query = useReservation(id);
   const cancelMutation = useCancelReservation();
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
+  const [extendOpen, setExtendOpen] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  if (query.isLoading) {
-    return (
-      <Screen>
-        <LoadingState fullScreen />
-      </Screen>
-    );
-  }
+  useEffect(() => {
+    if (!successMessage) return;
+    const timeout = setTimeout(() => setSuccessMessage(null), SUCCESS_BANNER_MS);
+    return () => clearTimeout(timeout);
+  }, [successMessage]);
 
-  if (query.isError) {
+  const header = <AppHeader title="Réservation" showBack showActions={false} />;
+
+  const notFound =
+    query.error instanceof AppError && (query.error.status === 404 || query.error.status === 403);
+
+  if (query.isPending) {
     return (
-      <Screen>
-        <ErrorState
-          message="Impossible de charger la réservation."
-          onRetry={() => void query.refetch()}
-        />
+      <Screen padded={false}>
+        {header}
+        <View style={styles.content}>
+          <ReservationDetailSkeleton />
+        </View>
       </Screen>
     );
   }
 
   const reservation = query.data;
-  if (!reservation) {
+  if (!reservation || notFound) {
     return (
-      <Screen>
-        <EmptyState title="Réservation introuvable" />
+      <Screen padded={false}>
+        {header}
+        {query.isError && !notFound ? (
+          <ReservationDetailError onRetry={() => void query.refetch()} retrying={query.isFetching} />
+        ) : (
+          <ReservationNotFound onBack={backToReservations} />
+        )}
       </Screen>
     );
   }
 
-  const canCancel =
-    reservation.status === 'PENDING' || reservation.status === 'APPROVED';
+  const actor = user ? { id: user.id, role: user.role } : null;
+  const timing = getReservationTiming(reservation, now);
+  const isOpen = isOpenStatus(reservation.status);
+  const inProgress = isOpen && timing.phase === 'active';
+  const canExtend = getExtensionIneligibility(reservation, now, actor) === null;
+  const canCancel = canCancelReservation(reservation, actor);
 
-  const resourceLabel =
-    reservation.resourceType === 'VEHICLE'
-      ? reservation.vehicle
-        ? `${reservation.vehicle.brand} ${reservation.vehicle.model} (${reservation.vehicle.registrationNumber})`
-        : 'Véhicule'
-      : reservation.room
-        ? reservation.room.name
-        : 'Salle';
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await query.refetch();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const handleCancel = async () => {
     try {
       await cancelMutation.mutateAsync(reservation.id);
-      setConfirmOpen(false);
-      Alert.alert('Réservation annulée', 'Votre réservation a été annulée.');
-      void query.refetch();
+      setConfirmCancelOpen(false);
+      setSuccessMessage('Votre réservation a été annulée.');
     } catch (error) {
-      const message =
-        error instanceof AppError
-          ? error.message
-          : 'Impossible d’annuler la réservation.';
-      Alert.alert('Erreur', message);
+      setConfirmCancelOpen(false);
+      Alert.alert('Annulation impossible', getCancelErrorMessage(error));
     }
   };
 
+  const handleExtended = (updated: Reservation) => {
+    setExtendOpen(false);
+    const end = parseApiDate(updated.endAt);
+    setSuccessMessage(
+      `Réservation prolongée jusqu'à ${format(end, 'HH:mm')} (${formatDetailDay(end, now).toLowerCase()}).`,
+    );
+  };
+
   return (
-    <Screen scroll>
-      <View style={styles.header}>
-        <Text style={styles.title}>{resourceLabel}</Text>
-        <Badge status={reservation.status} />
-      </View>
+    <Screen padded={false}>
+      {header}
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => void refresh()}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+      >
+        {successMessage ? <ReservationSuccessBanner message={successMessage} /> : null}
 
-      <Card style={styles.card}>
-        <Row label="Type" value={reservation.resourceType === 'VEHICLE' ? 'Véhicule' : 'Salle'} />
-        <Row label="Début" value={formatDateTime(reservation.startAt)} />
-        <Row label="Fin" value={formatDateTime(reservation.endAt)} />
+        <ReservationHeroCard reservation={reservation} inProgress={inProgress} />
+        <ReservationStatusNotice reservation={reservation} inProgress={inProgress} />
+        <ReservationTimeCard timing={timing} now={now} showRelative={isOpen} />
 
-        {reservation.resourceType === 'VEHICLE' ? (
-          <>
-            {reservation.destination ? (
-              <Row label="Destination" value={reservation.destination} />
-            ) : null}
-            {reservation.missionReason ? (
-              <Row label="Motif" value={reservation.missionReason} />
-            ) : null}
-            {reservation.passengerCount != null ? (
-              <Row label="Passagers" value={String(reservation.passengerCount)} />
-            ) : null}
-          </>
-        ) : (
-          <>
-            {reservation.meetingSubject ? (
-              <Row label="Objet" value={reservation.meetingSubject} />
-            ) : null}
-            {reservation.participantCount != null ? (
-              <Row label="Participants" value={String(reservation.participantCount)} />
-            ) : null}
-          </>
-        )}
+        <ReservationActions
+          canExtend={canExtend}
+          canCancel={canCancel}
+          extendHighlighted={inProgress}
+          onExtend={() => setExtendOpen(true)}
+          onCancel={() => setConfirmCancelOpen(true)}
+        />
 
-        {reservation.comment ? <Row label="Commentaire" value={reservation.comment} /> : null}
+        <ReservationInfoCard reservation={reservation} currentUserId={user?.id} />
+        <ReservationHistory reservation={reservation} />
+      </ScrollView>
 
-        {reservation.status === 'REJECTED' && reservation.rejectionReason ? (
-          <Row label="Motif de rejet" value={reservation.rejectionReason} />
-        ) : null}
-
-        {reservation.direction ? (
-          <Row label="Direction" value={reservation.direction.name} />
-        ) : null}
-      </Card>
-
-      {canCancel ? (
-        <Button
-          title="Annuler la réservation"
-          variant="danger"
-          onPress={() => setConfirmOpen(true)}
-          accessibilityLabel="Annuler la réservation"
-          style={styles.cancel}
+      {extendOpen ? (
+        <ExtendReservationSheet
+          reservation={reservation}
+          now={now}
+          onClose={() => setExtendOpen(false)}
+          onExtended={handleExtended}
         />
       ) : null}
 
-      <Button
-        title="Retour à la liste"
-        variant="ghost"
-        onPress={() => router.back()}
-        accessibilityLabel="Retour"
-      />
-
       <ConfirmModal
-        visible={confirmOpen}
+        visible={confirmCancelOpen}
         title="Annuler la réservation ?"
-        message="Cette action est définitive. La ressource sera libérée pour la période concernée."
+        message={
+          inProgress
+            ? 'Cette réservation est en cours. La ressource sera libérée immédiatement. Cette action est définitive.'
+            : 'La ressource sera libérée pour cette période. Cette action est définitive.'
+        }
         confirmLabel="Annuler la réservation"
-        cancelLabel="Fermer"
+        cancelLabel="Conserver"
         danger
         loading={cancelMutation.isPending}
         onConfirm={() => void handleCancel()}
-        onCancel={() => setConfirmOpen(false)}
+        onCancel={() => setConfirmCancelOpen(false)}
       />
     </Screen>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.row}>
-      <Text style={styles.label}>{label}</Text>
-      <Text style={styles.value}>{value}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  title: {
-    flex: 1,
-    fontSize: 22,
-    fontWeight: '800',
-    color: colors.text,
-  },
-  card: {
-    gap: spacing.md,
-  },
-  row: {
-    gap: spacing.xs,
-  },
-  label: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-  },
-  value: {
-    fontSize: 15,
-    color: colors.text,
-    lineHeight: 22,
-  },
-  cancel: {
-    marginTop: spacing.xl,
-    marginBottom: spacing.sm,
+  content: {
+    gap: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.xxl,
   },
 });

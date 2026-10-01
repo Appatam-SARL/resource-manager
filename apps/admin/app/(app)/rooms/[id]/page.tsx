@@ -1,26 +1,20 @@
 'use client';
 
 import { use } from 'react';
-import type { ResourceStatus } from '@resource-manager/types';
-import { PageHeader } from '@/components/shared/page-header';
-import { StatusBadge } from '@/components/shared/status-badge';
-import { ErrorState } from '@/components/shared/error-state';
+import { Building2, MapPin } from 'lucide-react';
+import { DetailErrorState } from '@/components/shared/detail-error-state';
 import { LoadingState } from '@/components/shared/loading-state';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { PageHeader } from '@/components/shared/page-header';
+import { Panel } from '@/components/shared/panel';
+import { ResourceStatusPanel } from '@/components/shared/resource-status-panel';
+import { StatusBadge } from '@/components/shared/status-badge';
+import { ResourceReservationsPanel } from '@/features/reservations';
 import {
   RoomForm,
   useRoom,
   useUpdateRoom,
   useUpdateRoomStatus,
 } from '@/features/rooms';
-import { RESOURCE_STATUS_LABELS } from '@/lib/format';
 import { canManageResources } from '@/lib/reservation-permissions';
 import { useAuth } from '@/providers/auth-provider';
 
@@ -42,11 +36,14 @@ export default function RoomDetailPage({ params }: PageProps) {
 
   if (roomQuery.isError || !roomQuery.data) {
     return (
-      <ErrorState
-        title="Salle introuvable"
-        onRetry={() => {
-          void roomQuery.refetch();
-        }}
+      <DetailErrorState
+        error={roomQuery.error}
+        notFoundTitle="Salle introuvable"
+        errorTitle="Impossible de charger la salle"
+        backHref="/rooms"
+        backLabel="Retour aux salles"
+        onRetry={() => void roomQuery.refetch()}
+        retrying={roomQuery.isFetching}
       />
     );
   }
@@ -54,68 +51,68 @@ export default function RoomDetailPage({ params }: PageProps) {
   const room = roomQuery.data;
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader
+        back={{ href: '/rooms', label: 'Salles' }}
         title={room.name}
-        description={`${room.location || 'Sans localisation'} · ${room.company?.name ?? 'Entreprise'}`}
-        actions={<StatusBadge status={room.status} />}
+        meta={
+          <>
+            <StatusBadge status={room.status} />
+            {room.location ? (
+              <span className="inline-flex items-center gap-1">
+                <MapPin className="size-3.5" aria-hidden />
+                {room.location}
+              </span>
+            ) : null}
+            {room.company ? (
+              <span className="inline-flex items-center gap-1">
+                <Building2 className="size-3.5" aria-hidden />
+                {room.company.name}
+              </span>
+            ) : null}
+          </>
+        }
       />
 
-      {canManage ? (
-        <div className="space-y-1.5 rounded-3xl bg-card p-5 ring-1 ring-border/60">
-          <Label>Statut de la salle</Label>
-          <Select
-            value={room.status}
-            onValueChange={(value) => {
-              if (value && value !== room.status) {
-                statusMutation.mutate(value as ResourceStatus);
-              }
-            }}
-          >
-            <SelectTrigger className="w-full max-w-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(Object.keys(RESOURCE_STATUS_LABELS) as ResourceStatus[]).map(
-                (key) => (
-                  <SelectItem key={key} value={key}>
-                    {RESOURCE_STATUS_LABELS[key]}
-                  </SelectItem>
-                ),
-              )}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            Préférez le changement de statut à la suppression.
-          </p>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="min-w-0 lg:col-span-2">
+          {canManage ? (
+            <RoomForm
+              initial={room}
+              loading={updateMutation.isPending}
+              submitLabel="Enregistrer les modifications"
+              onSubmit={async (values) => {
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars -- companyId is immutable on update
+                const { companyId, ...payload } = values;
+                await updateMutation.mutateAsync(payload);
+              }}
+            />
+          ) : (
+            <Panel title="Caractéristiques">
+              <dl className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <dt className="text-xs font-medium text-muted-foreground">Capacité</dt>
+                  <dd className="text-sm text-foreground">{room.capacity} personnes</dd>
+                </div>
+                <div className="sm:col-span-2">
+                  <dt className="text-xs font-medium text-muted-foreground">Description</dt>
+                  <dd className="text-sm whitespace-pre-line text-foreground">{room.description || '—'}</dd>
+                </div>
+              </dl>
+            </Panel>
+          )}
         </div>
-      ) : null}
-
-      {canManage ? (
-        <RoomForm
-          initial={room}
-          loading={updateMutation.isPending}
-          submitLabel="Enregistrer les modifications"
-          onSubmit={async (values) => {
-            // companyId is immutable on update
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omit companyId
-            const { companyId, ...payload } = values;
-            await updateMutation.mutateAsync(payload);
-            void roomQuery.refetch();
-          }}
-        />
-      ) : (
-        <div className="space-y-3 rounded-3xl bg-card p-5 text-sm ring-1 ring-border/60">
-          <p>
-            <span className="text-muted-foreground">Capacité :</span>{' '}
-            {room.capacity}
-          </p>
-          <p>
-            <span className="text-muted-foreground">Description :</span>{' '}
-            {room.description || '—'}
-          </p>
+        <div className="space-y-4">
+          <ResourceStatusPanel
+            status={room.status}
+            resourceLabel="cette salle"
+            canManage={canManage}
+            pending={statusMutation.isPending}
+            onChange={(status) => statusMutation.mutate(status)}
+          />
+          <ResourceReservationsPanel roomId={room.id} />
         </div>
-      )}
+      </div>
     </div>
   );
 }

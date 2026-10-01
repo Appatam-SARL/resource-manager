@@ -23,6 +23,7 @@ import { RolesGuard } from '../auth/guards/roles.guard.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { AvailabilityQueryDto } from './dto/availability-query.dto.js';
 import { CreateReservationDto } from './dto/create-reservation.dto.js';
+import { ExtendReservationDto } from './dto/extend-reservation.dto.js';
 import { ListReservationsQueryDto } from './dto/list-reservations-query.dto.js';
 import { RejectReservationDto } from './dto/reject-reservation.dto.js';
 import { UpdateReservationDto } from './dto/update-reservation.dto.js';
@@ -109,6 +110,21 @@ export class ReservationsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.reservationsService.reject(id, dto, user);
+  }
+
+  @Post(':id/extend')
+  @ApiOperation({
+    summary: 'Prolonger une réservation en attente ou approuvée',
+    description:
+      'Contrôle le périmètre, le statut, la ressource et les conflits sur la seule période ajoutée. Le statut est conservé.',
+  })
+  @ApiOkResponse()
+  extend(
+    @Param('id') id: string,
+    @Body() dto: ExtendReservationDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.reservationsService.extend(id, dto, user);
   }
 
   @Post(':id/cancel')

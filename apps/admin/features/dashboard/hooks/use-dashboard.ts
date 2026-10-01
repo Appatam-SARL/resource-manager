@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { ListQueryParams } from '@resource-manager/types';
 import { apiCallWithRefresh } from '@/hooks/use-api-client';
+import { getTwoDayRange } from '../lib/dashboard';
 
 export function useDashboardSummary() {
   return useQuery({
@@ -19,6 +20,16 @@ export function useDashboardReservations(limit = 8) {
       apiCallWithRefresh((client) =>
         client.getDashboardReservations({ limit } satisfies ListQueryParams),
       ),
+  });
+}
+
+/** Yesterday + today from GET /calendar (scoped by the API), for the day agenda and its comparison. */
+export function useDashboardTwoDays(now: Date) {
+  const params: ListQueryParams = getTwoDayRange(now);
+  return useQuery({
+    queryKey: ['calendar', 'dashboard', params],
+    queryFn: () => apiCallWithRefresh((client) => client.getCalendar(params)),
+    staleTime: 60_000,
   });
 }
 

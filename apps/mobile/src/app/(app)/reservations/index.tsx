@@ -1,240 +1,222 @@
 import { useState } from 'react';
-import {
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import type { Reservation, ReservationStatus } from '@resource-manager/types';
-import { useReservations } from '@/features/reservations/hooks/use-reservations';
+import { useAuth } from '@/features/auth/auth-provider';
+import { useNow } from '@/hooks/use-now';
+import { useReservationTimeline } from '@/features/reservations/hooks/use-reservation-timeline';
+import type { TemporalSegment } from '@/features/reservations/lib/reservation-list';
+import { ReservationCard } from '@/features/reservations/components/list/reservation-card';
+import { NextReservationCard } from '@/features/reservations/components/list/next-reservation-card';
+import { ReservationSegmentedControl } from '@/features/reservations/components/list/reservation-segmented-control';
+import {
+  DEFAULT_RESERVATION_FILTERS,
+  countSheetFilters,
+  ReservationFilterBar,
+  ReservationFilterSheet,
+  type ReservationFiltersValue,
+} from '@/features/reservations/components/list/reservation-filters';
+import {
+  ReservationEmptyState,
+  ReservationErrorState,
+  ReservationListFooter,
+  ReservationListSkeleton,
+} from '@/features/reservations/components/list/reservation-list-states';
 import { Screen } from '@/components/ui/Screen';
-import { Card } from '@/components/ui/Card';
-import { Badge, Chip } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { ErrorState } from '@/components/ui/ErrorState';
-import { LoadingState } from '@/components/ui/LoadingState';
-import { formatDateTime } from '@/lib/format';
-import { colors, spacing } from '@/constants/theme';
+import { AppHeader } from '@/components/layout/app-header';
+import { HeaderActionsWithAdd, openNewReservation } from '@/components/layout/header-add-button';
+import { colors, radius, spacing } from '@/constants/theme';
 
-type StatusFilter = '' | ReservationStatus;
-
-const FILTERS: { label: string; value: StatusFilter }[] = [
-  { label: 'Toutes', value: '' },
-  { label: 'En attente', value: 'PENDING' },
-  { label: 'Approuvées', value: 'APPROVED' },
-  { label: 'Rejetées', value: 'REJECTED' },
-  { label: 'Annulées', value: 'CANCELLED' },
-  { label: 'Terminées', value: 'COMPLETED' },
-];
-
-function reservationTitle(item: Reservation): string {
-  if (item.resourceType === 'VEHICLE' && item.vehicle) {
-    return `${item.vehicle.brand} ${item.vehicle.model}`;
-  }
-  if (item.resourceType === 'ROOM' && item.room) {
-    return item.room.name;
-  }
-  return item.resourceType === 'VEHICLE' ? 'Véhicule' : 'Salle';
+function openReservation(id: string) {
+  router.push(`/(app)/reservations/${id}`);
 }
 
 export default function ReservationsListScreen() {
-  const [status, setStatus] = useState<StatusFilter>('');
-  const [page, setPage] = useState(1);
+  const { user } = useAuth();
+  const now = useNow(60_000);
+  const [filters, setFilters] = useState<ReservationFiltersValue>(DEFAULT_RESERVATION_FILTERS);
+  const [selectedSegment, setSelectedSegment] = useState<TemporalSegment | null>(null);
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
 
-  const query = useReservations({
-    page,
-    limit: 15,
-    status: status || undefined,
+  const canChangeScope = Boolean(user && user.role !== 'EMPLOYEE');
+  const timeline = useReservationTimeline({
+    filters,
+    segment: selectedSegment,
+    currentUserId: user?.id,
+    now,
   });
 
-  if (query.isLoading && !query.data) {
-    return (
-      <Screen>
-        <LoadingState fullScreen />
-      </Screen>
+  const header = (
+    <AppHeader
+      title="Mes réservations"
+      subtitle={
+        filters.scope === 'scope'
+          ? 'Réservations de votre périmètre'
+          : 'Suivez vos demandes et réservations'
+      }
+      right={<HeaderActionsWithAdd />}
+    />
+  );
+
+  const controls = (
+    <View style={styles.controls}>
+      <ReservationSegmentedControl
+        value={timeline.segment}
+        onChange={setSelectedSegment}
+        counts={timeline.counts}
+      />
+      <ReservationFilterBar
+        value={filters}
+        onChange={setFilters}
+        onOpenSheet={() => setFilterSheetOpen(true)}
+        activeSheetFilters={countSheetFilters(filters)}
+      />
+    </View>
+  );
+
+  const resetFilters = () => setFilters({ ...DEFAULT_RESERVATION_FILTERS, scope: filters.scope });
+
+  let body;
+  if (timeline.isError) {
+    body = <ReservationErrorState onRetry={timeline.retry} retrying={timeline.isRetrying} />;
+  } else if (timeline.isInitialLoading) {
+    body = (
+      <View style={styles.listPadding}>
+        <ReservationListSkeleton />
+      </View>
     );
-  }
-
-  if (query.isError) {
-    return (
-      <Screen>
-        <ErrorState
-          message="Impossible de charger les réservations."
-          onRetry={() => void query.refetch()}
-        />
-      </Screen>
-    );
-  }
-
-  const items = query.data?.data ?? [];
-  const meta = query.data?.meta;
-  const canLoadMore = meta ? page < meta.totalPages : false;
-
-  return (
-    <Screen padded={false}>
-      <FlatList
-        data={items}
+  } else {
+    body = (
+      <SectionList
+        sections={timeline.sections}
         keyExtractor={(item) => item.id}
+        stickySectionHeadersEnabled={false}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={query.isRefetching}
-            onRefresh={() => {
-              setPage(1);
-              void query.refetch();
-            }}
+            refreshing={timeline.refreshing}
+            onRefresh={() => void timeline.refresh()}
             tintColor={colors.primary}
+            colors={[colors.primary]}
           />
         }
-        contentContainerStyle={styles.content}
+        onEndReached={timeline.loadMoreHistory}
+        onEndReachedThreshold={0.4}
+        initialNumToRender={8}
+        windowSize={9}
         ListHeaderComponent={
-          <View style={styles.header}>
-            <View style={styles.titleRow}>
-              <Text style={styles.title}>Réservations</Text>
-              <Button
-                title="Nouvelle"
-                onPress={() => router.push('/(app)/reservations/new')}
-                accessibilityLabel="Nouvelle réservation"
-                style={styles.newBtn}
-              />
-            </View>
-            <View style={styles.chips}>
-              {FILTERS.map((f) => (
-                <Chip
-                  key={f.value || 'all'}
-                  label={f.label}
-                  active={status === f.value}
-                  onPress={() => {
-                    setStatus(f.value);
-                    setPage(1);
-                  }}
-                />
-              ))}
-            </View>
-          </View>
-        }
-        ListEmptyComponent={
-          <EmptyState
-            title="Aucune réservation"
-            description="Vos réservations apparaîtront ici."
-          />
-        }
-        ListFooterComponent={
-          meta && meta.totalPages > 1 ? (
-            <View style={styles.pagination}>
-              <Button
-                title="Précédent"
-                variant="outline"
-                disabled={page <= 1 || query.isFetching}
-                onPress={() => setPage((p) => Math.max(1, p - 1))}
-                accessibilityLabel="Page précédente"
-                style={styles.pageBtn}
-              />
-              <Text style={styles.pageLabel}>
-                {page} / {meta.totalPages}
+          timeline.nextItem ? (
+            <View style={styles.nextBlock}>
+              <Text style={styles.nextLabel} accessibilityRole="header">
+                PROCHAINE RÉSERVATION
               </Text>
-              <Button
-                title="Suivant"
-                variant="outline"
-                disabled={!canLoadMore || query.isFetching}
-                onPress={() => setPage((p) => p + 1)}
-                accessibilityLabel="Page suivante"
-                style={styles.pageBtn}
-              />
+              <NextReservationCard item={timeline.nextItem} now={now} onPress={openReservation} />
             </View>
           ) : null
         }
-        renderItem={({ item }) => (
-          <Card
-            style={styles.card}
-            onPress={() => router.push(`/(app)/reservations/${item.id}`)}
-            accessibilityLabel={reservationTitle(item)}
-          >
-            <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle}>{reservationTitle(item)}</Text>
-              <Badge status={item.status} />
-            </View>
-            <Text style={styles.meta}>
-              {item.resourceType === 'VEHICLE' ? 'Véhicule' : 'Salle'}
+        renderSectionHeader={({ section }) => (
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle} accessibilityRole="header">
+              {section.title}
             </Text>
-            <Text style={styles.meta}>
-              {formatDateTime(item.startAt)} → {formatDateTime(item.endAt)}
-            </Text>
-          </Card>
+            <Text style={styles.sectionCount}>{section.data.length}</Text>
+          </View>
         )}
+        renderItem={({ item }) => (
+          <View style={styles.item}>
+            <ReservationCard item={item} onPress={openReservation} />
+          </View>
+        )}
+        ListEmptyComponent={
+          timeline.isEmpty ? (
+            <ReservationEmptyState
+              segment={timeline.segment}
+              resourceType={filters.resourceType}
+              status={filters.status}
+              onCreate={openNewReservation}
+              onResetFilters={resetFilters}
+            />
+          ) : null
+        }
+        ListFooterComponent={
+          <ReservationListFooter
+            loading={timeline.isFetchingMore}
+            error={timeline.loadMoreFailed}
+            onRetry={timeline.retryNextPage}
+          />
+        }
       />
+    );
+  }
+
+  return (
+    <Screen padded={false}>
+      {header}
+      {controls}
+      {body}
+      {filterSheetOpen ? (
+        <ReservationFilterSheet
+          value={filters}
+          canChangeScope={canChangeScope}
+          onClose={() => setFilterSheetOpen(false)}
+          onApply={(next) => {
+            setFilters(next);
+            setFilterSheetOpen(false);
+          }}
+        />
+      ) : null}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
+  controls: {
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+  },
+  listPadding: {
+    paddingHorizontal: spacing.lg,
+  },
+  listContent: {
+    flexGrow: 1,
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xxl,
-    paddingTop: spacing.md,
   },
-  header: {
-    gap: spacing.md,
-    marginBottom: spacing.lg,
+  nextBlock: {
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
   },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-  },
-  title: {
-    fontSize: 26,
+  nextLabel: {
+    fontSize: 12,
     fontWeight: '800',
-    color: colors.text,
-    flex: 1,
+    letterSpacing: 0.8,
+    color: colors.textMuted,
   },
-  newBtn: {
-    paddingHorizontal: spacing.md,
-    minHeight: 40,
-  },
-  chips: {
+  sectionHeader: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  card: {
-    marginBottom: spacing.md,
-    gap: spacing.xs,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     gap: spacing.sm,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
   },
-  cardTitle: {
-    flex: 1,
-    fontSize: 16,
+  sectionTitle: {
+    fontSize: 15,
     fontWeight: '700',
     color: colors.text,
   },
-  meta: {
-    fontSize: 13,
+  sectionCount: {
+    fontSize: 12,
+    fontWeight: '700',
     color: colors.textMuted,
+    paddingHorizontal: 7,
+    paddingVertical: 1,
+    borderRadius: radius.sm,
+    backgroundColor: '#E8EAED',
+    overflow: 'hidden',
   },
-  pagination: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-    marginBottom: spacing.lg,
-  },
-  pageBtn: {
-    flex: 1,
-    minHeight: 42,
-  },
-  pageLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textMuted,
+  item: {
+    marginBottom: spacing.md,
   },
 });

@@ -1,21 +1,15 @@
 'use client';
 
-import { useEffect } from 'react';
+import Link from 'next/link';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { Vehicle } from '@resource-manager/types';
-import { Button } from '@/components/ui/button';
+import { CompanyField } from '@/components/forms/company-field';
+import { FormField } from '@/components/forms/form-field';
+import { FormActions, FormCard, FormSection } from '@/components/forms/form-layout';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { useCompaniesOptions } from '@/hooks/use-companies-options';
 import { useAuth } from '@/providers/auth-provider';
 import {
   vehicleFormSchema,
@@ -27,6 +21,7 @@ type VehicleFormProps = {
   onSubmit: (values: VehicleFormValues) => Promise<void> | void;
   submitLabel?: string;
   loading?: boolean;
+  cancelHref?: string;
 };
 
 export function VehicleForm({
@@ -34,16 +29,16 @@ export function VehicleForm({
   onSubmit,
   submitLabel = 'Enregistrer',
   loading = false,
+  cancelHref,
 }: VehicleFormProps) {
   const { user } = useAuth();
-  const isGroupAdmin = user?.role === 'GROUP_ADMIN';
-  const companiesQuery = useCompaniesOptions(isGroupAdmin);
   const isEdit = Boolean(initial);
+  const canChooseCompany = user?.role === 'GROUP_ADMIN' && !isEdit;
 
   const form = useForm<VehicleFormValues>({
     resolver: zodResolver(vehicleFormSchema),
     defaultValues: {
-      companyId: initial?.companyId ?? user?.companyId ?? '',
+      companyId: initial?.companyId ?? (user?.role === 'GROUP_ADMIN' ? '' : (user?.companyId ?? '')),
       registrationNumber: initial?.registrationNumber ?? '',
       brand: initial?.brand ?? '',
       model: initial?.model ?? '',
@@ -51,109 +46,83 @@ export function VehicleForm({
       description: initial?.description ?? '',
     },
   });
-
-  useEffect(() => {
-    if (!isGroupAdmin && user?.companyId) {
-      form.setValue('companyId', user.companyId);
-    }
-  }, [isGroupAdmin, user?.companyId, form]);
+  const { errors, isDirty } = form.formState;
 
   return (
-    <form
-      className="space-y-4 rounded-3xl bg-card p-5 ring-1 ring-border/60"
-      onSubmit={form.handleSubmit(async (values) => {
-        await onSubmit({
-          ...values,
-          description: values.description || undefined,
-        });
-      })}
-    >
-      {isGroupAdmin && !isEdit ? (
-        <div className="space-y-1.5">
-          <Label>Entreprise</Label>
+    <FormCard>
+      <form
+        noValidate
+        onSubmit={form.handleSubmit(async (values) => {
+          try {
+            await onSubmit({ ...values, description: values.description || undefined });
+            form.reset(values);
+          } catch {
+            // The mutation already reports the error with a toast; keep the user's input.
+          }
+        })}
+      >
+        <FormSection title="Rattachement" description="Entreprise propriétaire du véhicule. Seuls ses collaborateurs peuvent le réserver.">
           <Controller
             control={form.control}
             name="companyId"
             render={({ field }) => (
-              <Select value={field.value} onValueChange={(value) => field.onChange(value ?? '')}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Sélectionner une entreprise" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(companiesQuery.data ?? []).map((company) => (
-                    <SelectItem key={company.id} value={company.id}>
-                      {company.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <CompanyField
+                value={field.value}
+                onChange={field.onChange}
+                editable={canChooseCompany}
+                companyName={initial?.company?.name ?? user?.company.name}
+                error={errors.companyId?.message}
+              />
             )}
           />
-          {form.formState.errors.companyId ? (
-            <p className="text-xs text-destructive">
-              {form.formState.errors.companyId.message}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
+        </FormSection>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label htmlFor="registrationNumber">Immatriculation</Label>
-          <Input
-            id="registrationNumber"
-            {...form.register('registrationNumber')}
-          />
-          {form.formState.errors.registrationNumber ? (
-            <p className="text-xs text-destructive">
-              {form.formState.errors.registrationNumber.message}
-            </p>
-          ) : null}
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="seats">Places</Label>
-          <Input
-            id="seats"
-            type="number"
-            min={1}
-            {...form.register('seats', { valueAsNumber: true })}
-          />
-          {form.formState.errors.seats ? (
-            <p className="text-xs text-destructive">
-              {form.formState.errors.seats.message}
-            </p>
-          ) : null}
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="brand">Marque</Label>
-          <Input id="brand" {...form.register('brand')} />
-          {form.formState.errors.brand ? (
-            <p className="text-xs text-destructive">
-              {form.formState.errors.brand.message}
-            </p>
-          ) : null}
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="model">Modèle</Label>
-          <Input id="model" {...form.register('model')} />
-          {form.formState.errors.model ? (
-            <p className="text-xs text-destructive">
-              {form.formState.errors.model.message}
-            </p>
-          ) : null}
-        </div>
-      </div>
+        <FormSection title="Identification" description="Informations visibles lors de la réservation.">
+          <FormField label="Immatriculation" htmlFor="registrationNumber" error={errors.registrationNumber?.message} required>
+            <Input
+              id="registrationNumber"
+              autoComplete="off"
+              placeholder="AB-123-CD"
+              className="font-mono uppercase"
+              aria-invalid={Boolean(errors.registrationNumber)}
+              {...form.register('registrationNumber')}
+            />
+          </FormField>
+          <FormField label="Nombre de places" htmlFor="seats" error={errors.seats?.message} hint="Conducteur compris." required>
+            <Input
+              id="seats"
+              type="number"
+              min={1}
+              inputMode="numeric"
+              aria-invalid={Boolean(errors.seats)}
+              {...form.register('seats', { valueAsNumber: true })}
+            />
+          </FormField>
+          <FormField label="Marque" htmlFor="brand" error={errors.brand?.message} required>
+            <Input id="brand" placeholder="Toyota" aria-invalid={Boolean(errors.brand)} {...form.register('brand')} />
+          </FormField>
+          <FormField label="Modèle" htmlFor="model" error={errors.model?.message} required>
+            <Input id="model" placeholder="Hilux" aria-invalid={Boolean(errors.model)} {...form.register('model')} />
+          </FormField>
+        </FormSection>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="description">Description</Label>
-        <Textarea id="description" rows={3} {...form.register('description')} />
-      </div>
+        <FormSection title="Description" description="Équipements, consignes d’utilisation… (facultatif)">
+          <FormField label="Description" htmlFor="description" error={errors.description?.message} wide>
+            <Textarea id="description" rows={4} {...form.register('description')} />
+          </FormField>
+        </FormSection>
 
-      <div className="flex justify-end gap-2 pt-2">
-        <Button type="submit" disabled={loading}>
-          {loading ? 'Enregistrement…' : submitLabel}
-        </Button>
-      </div>
-    </form>
+        <FormActions>
+          {cancelHref ? (
+            <Link href={cancelHref} className={buttonVariants({ variant: 'outline' })}>
+              Annuler
+            </Link>
+          ) : null}
+          <Button type="submit" disabled={loading || (isEdit && !isDirty)}>
+            {loading ? 'Enregistrement…' : submitLabel}
+          </Button>
+        </FormActions>
+      </form>
+    </FormCard>
   );
 }

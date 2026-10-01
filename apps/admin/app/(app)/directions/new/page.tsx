@@ -1,70 +1,44 @@
 'use client';
 
-import Link from 'next/link';
+import { use } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { ArrowLeft } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ErrorState } from '@/components/shared/error-state';
-import { LoadingState } from '@/components/shared/loading-state';
 import { PageHeader } from '@/components/shared/page-header';
 import { DirectionForm } from '@/features/directions/components/direction-form';
 import { useCreateDirection } from '@/features/directions/hooks/use-directions';
-import { useCompanies } from '@/features/companies/hooks/use-companies';
 
-export default function NewDirectionPage() {
+type NewDirectionPageProps = {
+  searchParams: Promise<{ companyId?: string | string[] }>;
+};
+
+export default function NewDirectionPage({ searchParams }: NewDirectionPageProps) {
+  const { companyId } = use(searchParams);
+  const initialCompanyId = typeof companyId === 'string' ? companyId : undefined;
   const router = useRouter();
-  const { data: companiesData, isLoading, isError, error, refetch } =
-    useCompanies({ page: 1, limit: 100, status: 'ACTIVE' });
   const createDirection = useCreateDirection();
+  const backHref = initialCompanyId ? `/companies/${initialCompanyId}` : '/directions';
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       <PageHeader
+        back={initialCompanyId ? { href: backHref, label: 'Entreprise' } : { href: '/directions', label: 'Directions' }}
         title="Nouvelle direction"
-        description="Rattachez une direction à une entreprise. Certaines entreprises n’en ont pas."
-        actions={
-          <Button variant="outline" render={<Link href="/directions" />}>
-            <ArrowLeft className="size-4" />
-            Retour
-          </Button>
-        }
+        description="Les directions sont facultatives : n’en créez que si l’entreprise est organisée ainsi."
       />
-
-      {isLoading ? <LoadingState rows={4} /> : null}
-
-      {isError ? (
-        <ErrorState
-          message={error instanceof Error ? error.message : undefined}
-          onRetry={() => void refetch()}
-        />
-      ) : null}
-
-      {companiesData ? (
-        <Card className="max-w-xl">
-          <CardHeader>
-            <CardTitle>Informations</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <DirectionForm
-              mode="create"
-              companies={companiesData.data}
-              onSubmit={async (values) => {
-                try {
-                  await createDirection.mutateAsync(values);
-                  toast.success('Direction créée');
-                  router.push('/directions');
-                } catch (err) {
-                  toast.error(
-                    err instanceof Error ? err.message : 'Erreur inattendue',
-                  );
-                }
-              }}
-            />
-          </CardContent>
-        </Card>
-      ) : null}
+      <DirectionForm
+        mode="create"
+        initialCompanyId={initialCompanyId}
+        cancelHref={backHref}
+        onSubmit={async (values) => {
+          try {
+            const created = await createDirection.mutateAsync(values);
+            toast.success('Direction créée');
+            router.push(`/directions/${created.id}`);
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Impossible de créer la direction');
+          }
+        }}
+      />
     </div>
   );
 }

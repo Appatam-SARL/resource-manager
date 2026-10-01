@@ -22,12 +22,16 @@ export const roomReservationSchema = z
     startTime: z.string().regex(timeRegex, 'Heure invalide (HH:mm)'),
     endDate: z.string().regex(dateRegex, 'Date invalide (AAAA-MM-JJ)'),
     endTime: z.string().regex(timeRegex, 'Heure invalide (HH:mm)'),
-    meetingSubject: z.string().min(1, 'Objet de la réunion requis'),
+    meetingSubject: z
+      .string()
+      .trim()
+      .min(1, 'Objet de la réunion requis')
+      .max(200, '200 caractères maximum'),
     participantCount: z
       .number({ error: 'Nombre de participants requis' })
       .int('Nombre entier requis')
       .positive('Au moins 1 participant'),
-    comment: z.string().optional(),
+    comment: z.string().max(1000, '1000 caractères maximum').optional(),
   })
   .superRefine((data, ctx) => {
     if (!compareDateTime(data.startDate, data.startTime, data.endDate, data.endTime)) {

@@ -1,163 +1,131 @@
 'use client';
 
-import { use, useState } from 'react';
+import { use } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { ArrowLeft } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ConfirmDialog } from '@/components/shared/confirm-dialog';
-import { ErrorState } from '@/components/shared/error-state';
+import { Building2, ChevronRight, Network, Power, PowerOff } from 'lucide-react';
+import { DetailErrorState } from '@/components/shared/detail-error-state';
+import { EntityIcon } from '@/components/shared/entity-icon';
 import { LoadingState } from '@/components/shared/loading-state';
 import { PageHeader } from '@/components/shared/page-header';
+import { Panel } from '@/components/shared/panel';
 import { StatusBadge } from '@/components/shared/status-badge';
+import { Button } from '@/components/ui/button';
 import { DirectionForm } from '@/features/directions/components/direction-form';
-import {
-  useDirection,
-  useUpdateDirection,
-  useUpdateDirectionStatus,
-} from '@/features/directions/hooks/use-directions';
+import { DirectionMembersPanel } from '@/features/directions/components/direction-members-panel';
+import { useDirectionStatusToggle } from '@/features/directions/hooks/use-direction-status-toggle';
+import { useDirection, useUpdateDirection } from '@/features/directions/hooks/use-directions';
 
 type DirectionDetailPageProps = {
   params: Promise<{ id: string }>;
 };
 
-export default function DirectionDetailPage({
-  params,
-}: DirectionDetailPageProps) {
+export default function DirectionDetailPage({ params }: DirectionDetailPageProps) {
   const { id } = use(params);
-  const router = useRouter();
-  const [confirmOpen, setConfirmOpen] = useState(false);
-
-  const { data: direction, isLoading, isError, error, refetch } =
-    useDirection(id);
+  const query = useDirection(id);
   const updateDirection = useUpdateDirection();
-  const updateStatus = useUpdateDirectionStatus();
+  const statusToggle = useDirectionStatusToggle();
 
-  const nextStatus = direction?.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+  if (query.isLoading) {
+    return <LoadingState label="Chargement de la direction…" />;
+  }
+
+  if (query.isError || !query.data) {
+    return (
+      <DetailErrorState
+        error={query.error}
+        notFoundTitle="Direction introuvable"
+        errorTitle="Impossible de charger la direction"
+        backHref="/directions"
+        backLabel="Retour aux directions"
+        onRetry={() => void query.refetch()}
+        retrying={query.isFetching}
+      />
+    );
+  }
+
+  const direction = query.data;
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader
-        title={direction?.name ?? 'Direction'}
-        description="Détail et modification de la direction."
+        back={{ href: '/directions', label: 'Directions' }}
+        title={direction.name}
+        meta={
+          <>
+            <StatusBadge status={direction.status} />
+            {direction.code ? <span className="font-mono">{direction.code}</span> : null}
+            {direction.company ? <span>{direction.company.name}</span> : null}
+          </>
+        }
         actions={
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" render={<Link href="/directions" />}>
-              <ArrowLeft className="size-4" />
-              Retour
+          direction.status === 'ACTIVE' ? (
+            <Button type="button" variant="outline" onClick={() => statusToggle.request(direction)}>
+              <PowerOff className="size-4" aria-hidden />
+              Désactiver
             </Button>
-            {direction ? (
-              <Button
-                type="button"
-                variant={direction.status === 'ACTIVE' ? 'outline' : 'default'}
-                onClick={() => setConfirmOpen(true)}
-              >
-                {direction.status === 'ACTIVE' ? 'Désactiver' : 'Réactiver'}
-              </Button>
-            ) : null}
-          </div>
+          ) : (
+            <Button type="button" onClick={() => statusToggle.request(direction)}>
+              <Power className="size-4" aria-hidden />
+              Réactiver
+            </Button>
+          )
         }
       />
 
-      {isLoading ? <LoadingState rows={5} /> : null}
-
-      {isError ? (
-        <ErrorState
-          message={error instanceof Error ? error.message : undefined}
-          onRetry={() => void refetch()}
-        />
+      {direction.status === 'INACTIVE' ? (
+        <p role="status" className="rounded-xl bg-muted/70 px-4 py-3 text-sm text-muted-foreground ring-1 ring-border">
+          Cette direction est désactivée : elle n’est plus proposée lors du rattachement des utilisateurs.
+        </p>
       ) : null}
 
-      {direction ? (
-        <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
-          <Card>
-            <CardHeader>
-              <CardTitle>Modifier</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <DirectionForm
-                mode="edit"
-                direction={direction}
-                onSubmit={async (values) => {
-                  try {
-                    await updateDirection.mutateAsync({
-                      id: direction.id,
-                      body: values,
-                    });
-                    toast.success('Direction mise à jour');
-                    router.push('/directions');
-                  } catch (err) {
-                    toast.error(
-                      err instanceof Error ? err.message : 'Erreur inattendue',
-                    );
-                  }
-                }}
-              />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Synthèse</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Statut</span>
-                <StatusBadge status={direction.status} />
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Entreprise</span>
-                <span>{direction.company?.name ?? '—'}</span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Code</span>
-                <span>{direction.code ?? '—'}</span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Utilisateurs</span>
-                <span>{direction._count?.users ?? 0}</span>
-              </div>
-            </CardContent>
-          </Card>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="min-w-0 lg:col-span-2">
+          <DirectionForm
+            mode="edit"
+            direction={direction}
+            onSubmit={async (values) => {
+              try {
+                await updateDirection.mutateAsync({ id: direction.id, body: values });
+                toast.success('Direction mise à jour');
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : 'Impossible de mettre à jour la direction');
+                throw error;
+              }
+            }}
+          />
         </div>
-      ) : null}
 
-      <ConfirmDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        title={
-          nextStatus === 'INACTIVE'
-            ? 'Désactiver la direction ?'
-            : 'Réactiver la direction ?'
-        }
-        description={
-          nextStatus === 'INACTIVE'
-            ? 'La direction ne sera plus proposée pour les nouveaux rattachements.'
-            : 'La direction pourra à nouveau être utilisée.'
-        }
-        confirmLabel={nextStatus === 'INACTIVE' ? 'Désactiver' : 'Réactiver'}
-        destructive={nextStatus === 'INACTIVE'}
-        loading={updateStatus.isPending}
-        onConfirm={() => {
-          void (async () => {
-            try {
-              await updateStatus.mutateAsync({ id, status: nextStatus });
-              toast.success(
-                nextStatus === 'INACTIVE'
-                  ? 'Direction désactivée'
-                  : 'Direction réactivée',
-              );
-              setConfirmOpen(false);
-            } catch (err) {
-              toast.error(
-                err instanceof Error ? err.message : 'Erreur inattendue',
-              );
-            }
-          })();
-        }}
-      />
+        <div className="space-y-4">
+          <Panel title="Place dans l’organisation">
+            <ol className="space-y-1" aria-label="Rattachement organisationnel">
+              <li>
+                <Link
+                  href={`/companies/${direction.companyId}`}
+                  className="group flex items-center gap-3 rounded-lg px-2 py-2 -mx-2 transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none"
+                >
+                  <EntityIcon icon={Building2} size="sm" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-xs text-muted-foreground">Entreprise</span>
+                    <span className="block truncate text-sm font-medium text-foreground">{direction.company?.name ?? '—'}</span>
+                  </span>
+                  <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+                </Link>
+              </li>
+              <li className="ml-6 flex items-center gap-3 border-l border-border py-2 pl-4" aria-current="true">
+                <EntityIcon icon={Network} size="sm" muted={direction.status === 'INACTIVE'} />
+                <span className="min-w-0">
+                  <span className="block text-xs text-muted-foreground">Direction</span>
+                  <span className="block truncate text-sm font-medium text-foreground">{direction.name}</span>
+                </span>
+              </li>
+            </ol>
+          </Panel>
+          <DirectionMembersPanel directionId={direction.id} />
+        </div>
+      </div>
+
+      {statusToggle.dialog}
     </div>
   );
 }

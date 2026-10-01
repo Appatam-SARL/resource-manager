@@ -1,47 +1,73 @@
 'use client';
 
 import { useState } from 'react';
-import { CheckCheck } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Bell, CheckCheck } from 'lucide-react';
 import type { Notification } from '@resource-manager/types';
+import { EmptyState } from '@/components/shared/empty-state';
+import { ErrorState } from '@/components/shared/error-state';
 import { PageHeader } from '@/components/shared/page-header';
 import { PaginationControls } from '@/components/shared/pagination-controls';
-import { ErrorState } from '@/components/shared/error-state';
-import { EmptyState } from '@/components/shared/empty-state';
-import { LoadingState } from '@/components/shared/loading-state';
 import { Button } from '@/components/ui/button';
 import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
   useNotifications,
+  useUnreadNotificationsCount,
 } from '@/features/notifications';
-import { formatDateTime } from '@/lib/format';
-import { cn } from 'cn';
+import {
+  NotificationList,
+  NotificationListSkeleton,
+} from '@/features/notifications/components/notification-list';
+import { notificationHref } from '@/features/notifications/lib/notification-display';
+
+const PAGE_SIZE = 20;
 
 export default function NotificationsPage() {
+  const router = useRouter();
   const [page, setPage] = useState(1);
-  const query = useNotifications(page, 20);
+  const query = useNotifications(page, PAGE_SIZE);
+  const unreadCountQuery = useUnreadNotificationsCount();
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
 
-  const notifications: Notification[] = query.data?.data ?? [];
-  const hasUnread = notifications.some(
-    (item: Notification) => !item.readAt,
-  );
+  const notifications = query.data?.data ?? [];
+  const meta = query.data?.meta;
+  const unreadCount = unreadCountQuery.data ?? 0;
+
+  const markAsRead = (notification: Notification) => {
+    if (!notification.readAt) markRead.mutate(notification.id);
+  };
+
+  const openNotification = (notification: Notification) => {
+    markAsRead(notification);
+    const href = notificationHref(notification);
+    if (href) router.push(href);
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
         title="Notifications"
-        description="Suivez les événements liés à vos réservations et à votre périmètre."
+        description="Événements liés aux réservations de votre périmètre."
+        meta={
+          unreadCountQuery.data !== undefined ? (
+            <span className="tabular-nums">
+              {unreadCount === 0
+                ? 'Tout est lu'
+                : `${unreadCount} non lue${unreadCount > 1 ? 's' : ''}`}
+            </span>
+          ) : null
+        }
         actions={
-          hasUnread ? (
+          unreadCount > 0 ? (
             <Button
               type="button"
               variant="outline"
               disabled={markAll.isPending}
               onClick={() => markAll.mutate()}
             >
-              <CheckCheck className="size-4" />
+              <CheckCheck className="size-4" aria-hidden />
               Tout marquer comme lu
             </Button>
           ) : null
@@ -49,73 +75,33 @@ export default function NotificationsPage() {
       />
 
       {query.isLoading ? (
-        <LoadingState label="Chargement des notifications…" />
+        <NotificationListSkeleton />
       ) : query.isError ? (
         <ErrorState
-          onRetry={() => {
-            void query.refetch();
-          }}
+          title="Impossible de charger les notifications"
+          onRetry={() => void query.refetch()}
+          retrying={query.isFetching}
         />
       ) : notifications.length === 0 ? (
         <EmptyState
+          icon={Bell}
           title="Aucune notification"
-          description="Vous n’avez pas encore de notification."
+          description="Vous serez notifié ici des demandes, approbations, refus et annulations de réservation."
         />
       ) : (
         <>
-          <ul className="space-y-3">
-            {notifications.map((notification: Notification) => {
-              const unread = !notification.readAt;
-              return (
-                <li
-                  key={notification.id}
-                  className={cn(
-                    'rounded-3xl bg-card p-4 ring-1 transition-colors',
-                    unread
-                      ? 'ring-primary/30 bg-secondary/40'
-                      : 'ring-border/60',
-                  )}
-                >
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0 space-y-1">
-                      <div className="flex items-center gap-2">
-                        {unread ? (
-                          <span className="size-2 shrink-0 rounded-full bg-primary" />
-                        ) : null}
-                        <p className="font-medium text-foreground">
-                          {notification.title}
-                        </p>
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        {notification.body}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatDateTime(notification.createdAt)}
-                      </p>
-                    </div>
-                    {unread ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={markRead.isPending}
-                        onClick={() => markRead.mutate(notification.id)}
-                      >
-                        Marquer comme lu
-                      </Button>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">Lue</span>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-          {query.data ? (
+          <NotificationList
+            notifications={notifications}
+            onOpen={openNotification}
+            onMarkRead={markAsRead}
+            markingId={markRead.isPending ? (markRead.variables ?? null) : null}
+          />
+          {meta && meta.totalPages > 1 ? (
             <PaginationControls
-              page={query.data.meta.page}
-              totalPages={query.data.meta.totalPages}
-              total={query.data.meta.total}
+              page={meta.page}
+              totalPages={meta.totalPages}
+              total={meta.total}
+              limit={PAGE_SIZE}
               onPageChange={setPage}
             />
           ) : null}

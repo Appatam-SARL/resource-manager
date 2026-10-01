@@ -1,168 +1,131 @@
 'use client';
 
-import { use, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { use } from 'react';
 import { toast } from 'sonner';
-import { ArrowLeft } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ConfirmDialog } from '@/components/shared/confirm-dialog';
-import { ErrorState } from '@/components/shared/error-state';
+import { Car, DoorOpen, Network, Power, PowerOff, Users } from 'lucide-react';
+import { DetailErrorState } from '@/components/shared/detail-error-state';
 import { LoadingState } from '@/components/shared/loading-state';
 import { PageHeader } from '@/components/shared/page-header';
+import { StatCard } from '@/components/shared/stat-card';
 import { StatusBadge } from '@/components/shared/status-badge';
+import { Button } from '@/components/ui/button';
+import { CompanyDirectionsPanel } from '@/features/companies/components/company-directions-panel';
 import { CompanyForm } from '@/features/companies/components/company-form';
-import {
-  useCompany,
-  useUpdateCompany,
-  useUpdateCompanyStatus,
-} from '@/features/companies/hooks/use-companies';
+import { useCompanyStatusToggle } from '@/features/companies/hooks/use-company-status-toggle';
+import { useCompany, useUpdateCompany } from '@/features/companies/hooks/use-companies';
+import { useAuth } from '@/providers/auth-provider';
 
 type CompanyDetailPageProps = {
   params: Promise<{ id: string }>;
 };
 
+function plural(count: number, singular: string, pluralForm: string): string {
+  return count > 1 ? pluralForm : singular;
+}
+
 export default function CompanyDetailPage({ params }: CompanyDetailPageProps) {
   const { id } = use(params);
-  const router = useRouter();
-  const [confirmOpen, setConfirmOpen] = useState(false);
-
-  const { data: company, isLoading, isError, error, refetch } = useCompany(id);
+  const { user } = useAuth();
+  const query = useCompany(id);
   const updateCompany = useUpdateCompany();
-  const updateStatus = useUpdateCompanyStatus();
+  const statusToggle = useCompanyStatusToggle();
 
-  const nextStatus = company?.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+  if (query.isLoading) {
+    return <LoadingState label="Chargement de l’entreprise…" />;
+  }
+
+  if (query.isError || !query.data) {
+    return (
+      <DetailErrorState
+        error={query.error}
+        notFoundTitle="Entreprise introuvable"
+        errorTitle="Impossible de charger l’entreprise"
+        backHref="/companies"
+        backLabel="Retour aux entreprises"
+        onRetry={() => void query.refetch()}
+        retrying={query.isFetching}
+      />
+    );
+  }
+
+  const company = query.data;
+  const counts = {
+    directions: company._count?.directions ?? 0,
+    users: company._count?.users ?? 0,
+    vehicles: company._count?.vehicles ?? 0,
+    rooms: company._count?.meetingRooms ?? 0,
+  };
+  const isOwnCompany = user?.companyId === company.id;
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader
-        title={company?.name ?? 'Entreprise'}
-        description="Détail et modification de l’entreprise."
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" render={<Link href="/companies" />}>
-              <ArrowLeft className="size-4" />
-              Retour
-            </Button>
-            {company ? (
-              <Button
-                type="button"
-                variant={company.status === 'ACTIVE' ? 'outline' : 'default'}
-                onClick={() => setConfirmOpen(true)}
-              >
-                {company.status === 'ACTIVE' ? 'Désactiver' : 'Réactiver'}
-              </Button>
+        back={{ href: '/companies', label: 'Entreprises' }}
+        title={company.name}
+        meta={
+          <>
+            <StatusBadge status={company.status} />
+            {company.code ? <span className="font-mono">{company.code}</span> : null}
+            {isOwnCompany ? (
+              <span className="rounded bg-secondary px-1.5 py-0.5 text-xs font-medium text-primary">Votre entreprise</span>
             ) : null}
-          </div>
+          </>
+        }
+        actions={
+          company.status === 'ACTIVE' ? (
+            <Button type="button" variant="outline" onClick={() => statusToggle.request(company)}>
+              <PowerOff className="size-4" aria-hidden />
+              Désactiver
+            </Button>
+          ) : (
+            <Button type="button" onClick={() => statusToggle.request(company)}>
+              <Power className="size-4" aria-hidden />
+              Réactiver
+            </Button>
+          )
         }
       />
 
-      {isLoading ? <LoadingState rows={5} /> : null}
+      {company.status === 'INACTIVE' ? (
+        <p role="status" className="rounded-xl bg-muted/70 px-4 py-3 text-sm text-muted-foreground ring-1 ring-border">
+          Cette entreprise est désactivée : aucune nouvelle réservation ni aucun nouvel utilisateur ne peut y être créé.
+          Son historique reste consultable.
+        </p>
+      ) : null}
 
-      {isError ? (
-        <ErrorState
-          message={error instanceof Error ? error.message : undefined}
-          onRetry={() => void refetch()}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard
+          label="Directions"
+          value={counts.directions}
+          icon={Network}
+          hint={counts.directions === 0 ? 'Aucun niveau direction' : plural(counts.directions, 'direction', 'directions')}
         />
-      ) : null}
+        <StatCard label="Utilisateurs" value={counts.users} icon={Users} hint={plural(counts.users, 'compte rattaché', 'comptes rattachés')} />
+        <StatCard label="Véhicules" value={counts.vehicles} icon={Car} hint="Flotte de l’entreprise" />
+        <StatCard label="Salles" value={counts.rooms} icon={DoorOpen} hint="Salles de réunion" />
+      </div>
 
-      {company ? (
-        <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
-          <Card>
-            <CardHeader>
-              <CardTitle>Modifier</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CompanyForm
-                mode="edit"
-                company={company}
-                onSubmit={async (values) => {
-                  try {
-                    await updateCompany.mutateAsync({ id: company.id, body: values });
-                    toast.success('Entreprise mise à jour');
-                    router.push('/companies');
-                  } catch (err) {
-                    toast.error(
-                      err instanceof Error ? err.message : 'Erreur inattendue',
-                    );
-                  }
-                }}
-              />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Synthèse</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Statut</span>
-                <StatusBadge status={company.status} />
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Code</span>
-                <span>{company.code ?? '—'}</span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Directions</span>
-                <span>{company._count?.directions ?? 0}</span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Utilisateurs</span>
-                <span>{company._count?.users ?? 0}</span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Véhicules</span>
-                <span>{company._count?.vehicles ?? 0}</span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Salles</span>
-                <span>{company._count?.meetingRooms ?? 0}</span>
-              </div>
-            </CardContent>
-          </Card>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="min-w-0 lg:col-span-2">
+          <CompanyForm
+            key={company.updatedAt}
+            mode="edit"
+            company={company}
+            onSubmit={async (values) => {
+              try {
+                await updateCompany.mutateAsync({ id: company.id, body: values });
+                toast.success('Entreprise mise à jour');
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : 'Impossible de mettre à jour l’entreprise');
+                throw error;
+              }
+            }}
+          />
         </div>
-      ) : null}
+        <CompanyDirectionsPanel companyId={company.id} canCreate={company.status === 'ACTIVE'} />
+      </div>
 
-      <ConfirmDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        title={
-          nextStatus === 'INACTIVE'
-            ? 'Désactiver l’entreprise ?'
-            : 'Réactiver l’entreprise ?'
-        }
-        description={
-          nextStatus === 'INACTIVE'
-            ? 'Une entreprise inactive ne pourra plus recevoir de nouvelles réservations.'
-            : 'L’entreprise pourra à nouveau être utilisée pour les réservations.'
-        }
-        confirmLabel={nextStatus === 'INACTIVE' ? 'Désactiver' : 'Réactiver'}
-        destructive={nextStatus === 'INACTIVE'}
-        loading={updateStatus.isPending}
-        onConfirm={() => {
-          void (async () => {
-            try {
-              await updateStatus.mutateAsync({
-                id,
-                status: nextStatus,
-              });
-              toast.success(
-                nextStatus === 'INACTIVE'
-                  ? 'Entreprise désactivée'
-                  : 'Entreprise réactivée',
-              );
-              setConfirmOpen(false);
-            } catch (err) {
-              toast.error(
-                err instanceof Error ? err.message : 'Erreur inattendue',
-              );
-            }
-          })();
-        }}
-      />
+      {statusToggle.dialog}
     </div>
   );
 }

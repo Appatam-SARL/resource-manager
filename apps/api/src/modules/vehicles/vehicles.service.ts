@@ -7,6 +7,7 @@ import {
   AuditAction,
   Prisma,
   ResourceStatus,
+  ResourceType,
 } from '@prisma/client';
 import { AccessScopeService } from '../../common/authorization/access-scope.service.js';
 import {
@@ -17,6 +18,7 @@ import { toPlainJson } from '../../common/utils/to-plain-json.js';
 import { PrismaService } from '../../database/prisma.service.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { AuditService } from '../audit/audit.service.js';
+import { RealtimeService } from '../realtime/realtime.service.js';
 import { CreateVehicleDto } from './dto/create-vehicle.dto.js';
 import { ListVehiclesQueryDto } from './dto/list-vehicles-query.dto.js';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
@@ -41,6 +43,7 @@ export class VehiclesService {
     private readonly prisma: PrismaService,
     private readonly accessScope: AccessScopeService,
     private readonly audit: AuditService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   async list(actor: AuthenticatedUser, query: ListVehiclesQueryDto) {
@@ -121,6 +124,7 @@ export class VehiclesService {
         },
       });
 
+      this.realtime.publishResourceCreated(ResourceType.VEHICLE, vehicle);
       return vehicle;
     } catch (error) {
       this.handleUniqueConflict(error);
@@ -160,6 +164,7 @@ export class VehiclesService {
         },
       });
 
+      this.realtime.publishResourceUpdated(ResourceType.VEHICLE, vehicle);
       return vehicle;
     } catch (error) {
       this.handleUniqueConflict(error);
@@ -189,6 +194,11 @@ export class VehiclesService {
       metadata: { from: existing.status, to: status },
     });
 
+    this.realtime.publishResourceAvailability(
+      ResourceType.VEHICLE,
+      vehicle,
+      'STATUS_CHANGED',
+    );
     return vehicle;
   }
 
@@ -219,6 +229,11 @@ export class VehiclesService {
         },
       });
 
+      this.realtime.publishResourceAvailability(
+        ResourceType.VEHICLE,
+        vehicle,
+        'STATUS_CHANGED',
+      );
       return {
         deleted: false,
         deactivated: true,
@@ -241,6 +256,7 @@ export class VehiclesService {
       },
     });
 
+    this.realtime.publishResourceDeleted(ResourceType.VEHICLE, existing);
     return {
       deleted: true,
       deactivated: false,

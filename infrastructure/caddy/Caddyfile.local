@@ -1,0 +1,33 @@
+# Local stack: plain HTTP on localhost, a single origin for the admin and the API.
+#   http://localhost:8088          → admin
+#   http://localhost:8088/api/*    → API (REST, health)
+#   http://localhost:8088/socket.io → API (WebSocket, namespace /realtime)
+#   http://localhost:8088/docs     → Swagger (local only)
+
+{
+	admin off
+	auto_https off
+}
+
+import /etc/caddy/snippets/security-headers.caddy
+
+:80 {
+	import security_headers
+
+	encode zstd gzip
+
+	@api path /api/* /socket.io/* /docs /docs/*
+	handle @api {
+		reverse_proxy api:3000
+	}
+
+	handle {
+		import admin_csp
+		reverse_proxy admin:3001
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

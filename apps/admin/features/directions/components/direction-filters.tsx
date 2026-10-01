@@ -1,7 +1,6 @@
 'use client';
 
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { FilterChips, SearchInput, type FilterChipOption } from '@/components/shared/data-toolbar';
 import {
   Select,
   SelectContent,
@@ -9,72 +8,68 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { Company } from '@resource-manager/types';
+import { selectItems } from '@/lib/select-items';
+import { useCompaniesOptions } from '@/hooks/use-companies-options';
+import { useAuth } from '@/providers/auth-provider';
 
-type DirectionFiltersProps = {
+export type DirectionListFilters = {
   search: string;
-  status: string;
+  status: '' | 'ACTIVE' | 'INACTIVE';
   companyId: string;
-  companies: Company[];
-  onSearchChange: (value: string) => void;
-  onStatusChange: (value: string) => void;
-  onCompanyChange: (value: string) => void;
 };
 
-export function DirectionFilters({
-  search,
-  status,
-  companyId,
-  companies,
-  onSearchChange,
-  onStatusChange,
-  onCompanyChange,
-}: DirectionFiltersProps) {
+export const EMPTY_DIRECTION_FILTERS: DirectionListFilters = { search: '', status: '', companyId: '' };
+
+const STATUS_OPTIONS: FilterChipOption<'ALL' | 'ACTIVE' | 'INACTIVE'>[] = [
+  { value: 'ALL', label: 'Toutes' },
+  { value: 'ACTIVE', label: 'Actives' },
+  { value: 'INACTIVE', label: 'Inactives' },
+];
+
+type DirectionFiltersProps = {
+  value: DirectionListFilters;
+  onChange: (next: Partial<DirectionListFilters>) => void;
+};
+
+export function DirectionFilters({ value, onChange }: DirectionFiltersProps) {
+  const { user } = useAuth();
+  const isGroupAdmin = user?.role === 'GROUP_ADMIN';
+  const companiesQuery = useCompaniesOptions(isGroupAdmin);
+
   return (
-    <div className="flex flex-col gap-3 rounded-2xl bg-card p-4 ring-1 ring-border/60 lg:flex-row lg:items-end">
-      <div className="min-w-0 flex-1 space-y-2">
-        <Label htmlFor="direction-search">Recherche</Label>
-        <Input
-          id="direction-search"
-          placeholder="Nom ou code…"
-          value={search}
-          onChange={(event) => onSearchChange(event.target.value)}
+    <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+      <SearchInput
+        value={value.search}
+        onChange={(search) => onChange({ search })}
+        placeholder="Nom ou code…"
+        className="lg:max-w-sm"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <FilterChips
+          label="Filtrer par statut"
+          options={STATUS_OPTIONS}
+          value={value.status || 'ALL'}
+          onChange={(status) => onChange({ status: status === 'ALL' ? '' : status })}
         />
-      </div>
-      <div className="w-full space-y-2 lg:w-56">
-        <Label>Entreprise</Label>
-        <Select
-          value={companyId}
-          onValueChange={(value) => onCompanyChange(value ?? 'all')}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Toutes les entreprises" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Toutes</SelectItem>
-            {companies.map((company) => (
-              <SelectItem key={company.id} value={company.id}>
-                {company.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="w-full space-y-2 lg:w-44">
-        <Label>Statut</Label>
-        <Select
-          value={status}
-          onValueChange={(value) => onStatusChange(value ?? 'all')}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Tous les statuts" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Tous</SelectItem>
-            <SelectItem value="ACTIVE">Actif</SelectItem>
-            <SelectItem value="INACTIVE">Inactif</SelectItem>
-          </SelectContent>
-        </Select>
+        {isGroupAdmin ? (
+          <Select
+            value={value.companyId || 'ALL'}
+            onValueChange={(next) => onChange({ companyId: !next || next === 'ALL' ? '' : next })}
+            items={selectItems(companiesQuery.data ?? [], { ALL: 'Toutes les entreprises' })}
+          >
+            <SelectTrigger className="h-9 w-full sm:w-56" aria-label="Entreprise">
+              <SelectValue placeholder="Toutes les entreprises" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">Toutes les entreprises</SelectItem>
+              {(companiesQuery.data ?? []).map((company) => (
+                <SelectItem key={company.id} value={company.id}>
+                  {company.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
       </div>
     </div>
   );

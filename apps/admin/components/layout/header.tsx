@@ -1,91 +1,171 @@
 'use client';
 
+import { Fragment } from 'react';
 import Link from 'next/link';
-import { Bell, Menu, Search } from 'lucide-react';
+import { usePathname } from 'next/navigation';
+import { Bell, Menu, PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
+import { isMacPlatform, useCommandMenu } from '@/components/layout/command-menu';
+import { getBreadcrumbs } from '@/components/layout/navigation';
 import { useSidebar } from '@/components/layout/sidebar-context';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { useNotifications } from '@/features/notifications/hooks/use-notifications';
-import { displayName, organizationContext, ROLE_LABELS } from '@/lib/rbac';
+import { UserMenu } from '@/components/layout/user-menu';
+import { UserAvatar } from '@/components/shared/user-avatar';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useUnreadNotificationsCount } from '@/features/notifications/hooks/use-notifications';
+import { displayName } from '@/lib/rbac';
 import { useAuth } from '@/providers/auth-provider';
 
-function initials(firstName: string, lastName: string): string {
-  const a = firstName.trim().charAt(0);
-  const b = lastName.trim().charAt(0);
-  return `${a}${b}`.toUpperCase() || '?';
+function Breadcrumbs() {
+  const pathname = usePathname();
+  const crumbs = getBreadcrumbs(pathname);
+  return (
+    <nav aria-label="Fil d’Ariane" className="min-w-0">
+      <ol className="flex min-w-0 items-center gap-2 text-[13.5px]">
+        {crumbs.map((crumb, index) => {
+          const last = index === crumbs.length - 1;
+          return (
+            <Fragment key={`${crumb.label}-${index}`}>
+              {index > 0 ? (
+                <li aria-hidden className="text-muted-foreground/50">
+                  /
+                </li>
+              ) : null}
+              <li className="min-w-0">
+                {crumb.href && !last ? (
+                  <Link
+                    href={crumb.href}
+                    className="truncate rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                  >
+                    {crumb.label}
+                  </Link>
+                ) : (
+                  <span className="block truncate font-medium text-foreground" aria-current={last ? 'page' : undefined}>
+                    {crumb.label}
+                  </span>
+                )}
+              </li>
+            </Fragment>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
+
+function NotificationsButton() {
+  const unreadCountQuery = useUnreadNotificationsCount();
+  const unreadCount = unreadCountQuery.data ?? 0;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Link
+            href="/notifications"
+            className={buttonVariants({
+              variant: 'ghost',
+              size: 'icon',
+              className: 'relative text-muted-foreground hover:text-foreground',
+            })}
+            aria-label={unreadCount > 0 ? `Notifications (${unreadCount} non lues)` : 'Notifications'}
+          />
+        }
+      >
+        <Bell className="size-[17px]" />
+        {unreadCount > 0 ? (
+          <span className="absolute top-0.5 right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground tabular-nums ring-2 ring-background">
+            {unreadCount > 9 ? '9+' : unreadCount}
+          </span>
+        ) : null}
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        {unreadCount > 0 ? `${unreadCount} notification${unreadCount > 1 ? 's' : ''} non lue${unreadCount > 1 ? 's' : ''}` : 'Notifications'}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 export function Header() {
   const { user } = useAuth();
-  const { toggle } = useSidebar();
-  const notificationsQuery = useNotifications(1, 20);
+  const { collapsed, toggleCollapsed, setMobileOpen } = useSidebar();
+  const { open: openCommandMenu } = useCommandMenu();
 
   if (!user) return null;
 
-  const name = displayName(user);
-  const org = organizationContext(user);
-  const unreadCount =
-    notificationsQuery.data?.data.filter((n) => !n.readAt).length ?? 0;
+  const shortcut = isMacPlatform() ? '⌘K' : 'Ctrl K';
 
   return (
-    <header className="flex items-center gap-3 rounded-3xl bg-card px-3 py-3 shadow-sm ring-1 ring-border/60 md:px-4">
+    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-1.5 border-b border-border bg-background/90 px-3 backdrop-blur-sm md:px-5 lg:px-6">
       <Button
         type="button"
         variant="ghost"
         size="icon"
-        className="shrink-0 lg:hidden"
-        onClick={toggle}
+        className="text-muted-foreground md:hidden"
+        onClick={() => setMobileOpen(true)}
         aria-label="Ouvrir le menu"
       >
         <Menu className="size-5" />
       </Button>
 
-      <div className="relative min-w-0 flex-1">
-        <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          type="search"
-          placeholder="Rechercher…"
-          className="h-10 rounded-2xl border-transparent bg-muted/70 pr-3 pl-9 focus-visible:bg-background"
-          aria-label="Rechercher"
-        />
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="-ml-1.5 hidden text-muted-foreground xl:inline-flex"
+              onClick={toggleCollapsed}
+              aria-label={collapsed ? 'Déplier le menu' : 'Réduire le menu'}
+              aria-pressed={collapsed}
+            />
+          }
+        >
+          {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{collapsed ? 'Déplier le menu' : 'Réduire le menu'}</TooltipContent>
+      </Tooltip>
+
+      <div className="min-w-0 flex-1 px-1 xl:pl-2">
+        <Breadcrumbs />
       </div>
 
+      <button
+        type="button"
+        onClick={openCommandMenu}
+        className="mr-1 hidden h-8 w-56 items-center gap-2 rounded-md border border-transparent bg-muted/80 px-2.5 text-[13px] text-muted-foreground transition-colors hover:border-border hover:bg-card hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none md:flex lg:w-64"
+        aria-label={`Rechercher (${shortcut})`}
+      >
+        <Search className="size-3.5" aria-hidden />
+        <span className="flex-1 text-left">Rechercher…</span>
+        <kbd className="rounded border border-border bg-card px-1.5 py-px font-sans text-[10.5px] font-medium text-muted-foreground">
+          {shortcut}
+        </kbd>
+      </button>
       <Button
         type="button"
         variant="ghost"
         size="icon"
-        className="relative shrink-0 rounded-2xl"
-        render={<Link href="/notifications" />}
-        aria-label={
-          unreadCount > 0
-            ? `Notifications (${unreadCount} non lues)`
-            : 'Notifications'
-        }
+        className="text-muted-foreground md:hidden"
+        onClick={openCommandMenu}
+        aria-label="Rechercher"
       >
-        <Bell className="size-5" />
-        {unreadCount > 0 ? (
-          <span className="absolute top-1.5 right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
-            {unreadCount > 9 ? '9+' : unreadCount}
-          </span>
-        ) : null}
+        <Search className="size-4" />
       </Button>
 
-      <div className="hidden items-center gap-3 border-l border-border pl-3 sm:flex">
-        <Avatar size="default" className="bg-secondary">
-          <AvatarFallback className="bg-secondary font-medium text-primary">
-            {initials(user.firstName, user.lastName)}
-          </AvatarFallback>
-        </Avatar>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-foreground">{name}</p>
-          <p className="truncate text-xs text-muted-foreground">{user.email}</p>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {ROLE_LABELS[user.role]} · {org.company}
-            {org.direction !== 'Aucune direction' ? ` · ${org.direction}` : ''}
-          </p>
-        </div>
-      </div>
+      <NotificationsButton />
+
+      {/* From md the account menu is in the sidebar. */}
+      <UserMenu
+        trigger={
+          <button
+            type="button"
+            className="ml-0.5 rounded-full focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none md:hidden"
+            aria-label={`Compte : ${displayName(user)}`}
+          >
+            <UserAvatar firstName={user.firstName} lastName={user.lastName} />
+          </button>
+        }
+      />
     </header>
   );
 }

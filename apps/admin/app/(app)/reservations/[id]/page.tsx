@@ -1,62 +1,34 @@
 'use client';
 
-import { use, useState, type ReactNode } from 'react';
+import { use } from 'react';
+import { Ban, Check, CircleAlert, Clock3, X } from 'lucide-react';
+import { DetailErrorState } from '@/components/shared/detail-error-state';
+import { LoadingState } from '@/components/shared/loading-state';
 import { PageHeader } from '@/components/shared/page-header';
 import { StatusBadge } from '@/components/shared/status-badge';
-import { ErrorState } from '@/components/shared/error-state';
-import { LoadingState } from '@/components/shared/loading-state';
-import { ConfirmDialog } from '@/components/shared/confirm-dialog';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useReservation, useReservationDecisions } from '@/features/reservations';
 import {
-  RejectReservationDialog,
-  useApproveReservation,
-  useCancelReservation,
-  useRejectReservation,
-  useReservation,
-} from '@/features/reservations';
-import {
-  formatDateTime,
-  reservationResourceLabel,
-  RESOURCE_TYPE_LABELS,
-  userDisplayName,
-} from '@/lib/format';
-import {
-  canApproveOrReject,
-  canCancelReservation,
-} from '@/lib/reservation-permissions';
+  ReservationHistoryPanel,
+  ReservationRequestPanel,
+  ReservationRequesterPanel,
+  ReservationResourcePanel,
+  ReservationSlotPanel,
+} from '@/features/reservations/components/detail/reservation-detail-sections';
+import { formatDateTime, reservationResourceLabel, RESOURCE_TYPE_LABELS } from '@/lib/format';
+import { canAccessRoute } from '@/lib/rbac';
+import { canApproveOrReject, canCancelReservation } from '@/lib/reservation-permissions';
 import { useAuth } from '@/providers/auth-provider';
 
 type PageProps = {
   params: Promise<{ id: string }>;
 };
 
-function DetailRow({
-  label,
-  value,
-}: {
-  label: string;
-  value: ReactNode;
-}) {
-  return (
-    <div className="grid gap-1 border-b border-border/60 py-3 last:border-b-0 sm:grid-cols-[180px_1fr]">
-      <dt className="text-sm text-muted-foreground">{label}</dt>
-      <dd className="text-sm font-medium text-foreground">{value || '—'}</dd>
-    </div>
-  );
-}
-
 export default function ReservationDetailPage({ params }: PageProps) {
   const { id } = use(params);
   const { user } = useAuth();
   const query = useReservation(id);
-  const approveMutation = useApproveReservation();
-  const rejectMutation = useRejectReservation();
-  const cancelMutation = useCancelReservation();
-
-  const [approveOpen, setApproveOpen] = useState(false);
-  const [rejectOpen, setRejectOpen] = useState(false);
-  const [cancelOpen, setCancelOpen] = useState(false);
+  const decisions = useReservationDecisions();
 
   if (query.isLoading) {
     return <LoadingState label="Chargement de la réservation…" />;
@@ -64,201 +36,102 @@ export default function ReservationDetailPage({ params }: PageProps) {
 
   if (query.isError || !query.data || !user) {
     return (
-      <ErrorState
-        title="Réservation introuvable"
-        onRetry={() => {
-          void query.refetch();
-        }}
+      <DetailErrorState
+        error={query.error}
+        notFoundTitle="Réservation introuvable"
+        errorTitle="Impossible de charger la réservation"
+        backHref="/reservations"
+        backLabel="Retour aux réservations"
+        onRetry={() => void query.refetch()}
+        retrying={query.isFetching}
       />
     );
   }
 
   const reservation = query.data;
-  const showApprove = canApproveOrReject(user, reservation);
+  const showDecision = canApproveOrReject(user, reservation);
   const showCancel = canCancelReservation(user, reservation);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader
-        title="Détail de la réservation"
-        description={reservationResourceLabel(reservation)}
-        actions={<StatusBadge status={reservation.status} />}
+        back={{ href: '/reservations', label: 'Réservations' }}
+        title={reservationResourceLabel(reservation)}
+        meta={
+          <>
+            <StatusBadge status={reservation.status} />
+            <span>{RESOURCE_TYPE_LABELS[reservation.resourceType]}</span>
+            <span aria-hidden>·</span>
+            <span>Demandée le {formatDateTime(reservation.createdAt)}</span>
+          </>
+        }
+        actions={
+          showCancel ? (
+            <Button type="button" variant="outline" onClick={() => decisions.cancel(reservation.id)}>
+              <Ban className="size-4" aria-hidden />
+              Annuler la réservation
+            </Button>
+          ) : undefined
+        }
       />
 
-      {(showApprove || showCancel) && (
-        <div className="flex flex-wrap gap-2">
-          {showApprove ? (
-            <>
-              <Button type="button" onClick={() => setApproveOpen(true)}>
-                Approuver
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={() => setRejectOpen(true)}
-              >
-                Rejeter
-              </Button>
-            </>
-          ) : null}
-          {showCancel ? (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setCancelOpen(true)}
-            >
-              Annuler
+      {showDecision ? (
+        <section
+          aria-label="Décision"
+          className="flex flex-col gap-4 rounded-xl bg-warning/[0.06] p-4 ring-1 ring-warning/20 sm:flex-row sm:items-center sm:justify-between sm:p-5"
+        >
+          <div className="flex items-start gap-3">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-warning/10 text-warning">
+              <Clock3 className="size-4" aria-hidden />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-foreground">Cette demande attend votre décision</p>
+              <p className="text-[13px] text-muted-foreground">
+                Vérifiez le créneau et la ressource avant d’approuver. Un refus nécessite un motif.
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button type="button" variant="outline" onClick={() => decisions.reject(reservation.id)}>
+              <X className="size-4" aria-hidden />
+              Refuser
             </Button>
-          ) : null}
-        </div>
-      )}
-
-      <Card className="rounded-3xl">
-        <CardHeader>
-          <CardTitle>Informations générales</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <dl>
-            <DetailRow
-              label="Type"
-              value={
-                RESOURCE_TYPE_LABELS[
-                  reservation.resourceType as keyof typeof RESOURCE_TYPE_LABELS
-                ]
-              }
-            />
-            <DetailRow
-              label="Ressource"
-              value={reservationResourceLabel(reservation)}
-            />
-            <DetailRow
-              label="Demandeur"
-              value={userDisplayName(reservation.user)}
-            />
-            <DetailRow
-              label="Entreprise"
-              value={reservation.company?.name}
-            />
-            <DetailRow
-              label="Direction"
-              value={reservation.direction?.name ?? 'Aucune direction'}
-            />
-            <DetailRow
-              label="Début"
-              value={formatDateTime(reservation.startAt)}
-            />
-            <DetailRow label="Fin" value={formatDateTime(reservation.endAt)} />
-            <DetailRow label="Statut" value={<StatusBadge status={reservation.status} />} />
-            <DetailRow
-              label="Créée le"
-              value={formatDateTime(reservation.createdAt)}
-            />
-          </dl>
-        </CardContent>
-      </Card>
-
-      {reservation.resourceType === 'VEHICLE' ? (
-        <Card className="rounded-3xl">
-          <CardHeader>
-            <CardTitle>Détails véhicule</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <dl>
-              <DetailRow label="Destination" value={reservation.destination} />
-              <DetailRow
-                label="Motif de mission"
-                value={reservation.missionReason}
-              />
-              <DetailRow
-                label="Passagers"
-                value={reservation.passengerCount}
-              />
-              <DetailRow label="Commentaire" value={reservation.comment} />
-            </dl>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card className="rounded-3xl">
-          <CardHeader>
-            <CardTitle>Détails salle</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <dl>
-              <DetailRow label="Objet" value={reservation.meetingSubject} />
-              <DetailRow
-                label="Participants"
-                value={reservation.participantCount}
-              />
-              <DetailRow label="Commentaire" value={reservation.comment} />
-            </dl>
-          </CardContent>
-        </Card>
-      )}
-
-      {reservation.status === 'REJECTED' ? (
-        <Card className="rounded-3xl border-destructive/20">
-          <CardHeader>
-            <CardTitle>Motif de rejet</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-foreground">
-              {reservation.rejectionReason || '—'}
-            </p>
-          </CardContent>
-        </Card>
+            <Button type="button" onClick={() => decisions.approve(reservation.id)}>
+              <Check className="size-4" aria-hidden />
+              Approuver
+            </Button>
+          </div>
+        </section>
       ) : null}
 
-      <ConfirmDialog
-        open={approveOpen}
-        onOpenChange={setApproveOpen}
-        title="Approuver la réservation"
-        description="Confirmez-vous l’approbation de cette demande ?"
-        confirmLabel="Approuver"
-        loading={approveMutation.isPending}
-        onConfirm={() => {
-          approveMutation.mutate(reservation.id, {
-            onSettled: () => {
-              setApproveOpen(false);
-              void query.refetch();
-            },
-          });
-        }}
-      />
+      {reservation.status === 'REJECTED' ? (
+        <section
+          aria-label="Motif du refus"
+          className="flex items-start gap-3 rounded-xl bg-destructive/[0.04] p-4 ring-1 ring-destructive/15 sm:p-5"
+        >
+          <CircleAlert className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
+          <div>
+            <p className="text-sm font-semibold text-foreground">Motif du refus</p>
+            <p className="mt-0.5 text-sm whitespace-pre-line text-muted-foreground">
+              {reservation.rejectionReason || 'Aucun motif renseigné.'}
+            </p>
+          </div>
+        </section>
+      ) : null}
 
-      <RejectReservationDialog
-        open={rejectOpen}
-        onOpenChange={setRejectOpen}
-        loading={rejectMutation.isPending}
-        onConfirm={(rejectionReason) => {
-          rejectMutation.mutate(
-            { id: reservation.id, rejectionReason },
-            {
-              onSettled: () => {
-                setRejectOpen(false);
-                void query.refetch();
-              },
-            },
-          );
-        }}
-      />
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="space-y-4 lg:col-span-2">
+          <ReservationSlotPanel reservation={reservation} />
+          <ReservationRequestPanel reservation={reservation} />
+        </div>
+        <div className="space-y-4">
+          <ReservationRequesterPanel reservation={reservation} />
+          <ReservationResourcePanel reservation={reservation} canOpenResource={canAccessRoute(user.role, reservation.resourceType === 'VEHICLE' ? '/vehicles' : '/rooms')} />
+          <ReservationHistoryPanel reservation={reservation} />
+        </div>
+      </div>
 
-      <ConfirmDialog
-        open={cancelOpen}
-        onOpenChange={setCancelOpen}
-        title="Annuler la réservation"
-        description="Cette action libère le créneau. Continuer ?"
-        confirmLabel="Annuler la réservation"
-        destructive
-        loading={cancelMutation.isPending}
-        onConfirm={() => {
-          cancelMutation.mutate(reservation.id, {
-            onSettled: () => {
-              setCancelOpen(false);
-              void query.refetch();
-            },
-          });
-        }}
-      />
+      {decisions.dialogs}
     </div>
   );
 }

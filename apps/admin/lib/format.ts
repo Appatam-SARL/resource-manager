@@ -31,7 +31,7 @@ export const RESOURCE_STATUS_LABELS: Record<ResourceStatus, string> = {
 export const RESERVATION_STATUS_LABELS: Record<ReservationStatus, string> = {
   PENDING: 'En attente',
   APPROVED: 'Approuvée',
-  REJECTED: 'Rejetée',
+  REJECTED: 'Refusée',
   CANCELLED: 'Annulée',
   COMPLETED: 'Terminée',
 };

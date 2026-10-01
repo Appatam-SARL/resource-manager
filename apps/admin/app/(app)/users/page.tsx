@@ -3,90 +3,110 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Plus } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { ErrorState } from '@/components/shared/error-state';
 import { PageHeader } from '@/components/shared/page-header';
 import { PaginationControls } from '@/components/shared/pagination-controls';
-import { useCompanies } from '@/features/companies/hooks/use-companies';
-import { UserFilters } from '@/features/users/components/user-filters';
+import { Button, buttonVariants } from '@/components/ui/button';
+import {
+  EMPTY_USER_FILTERS,
+  UserFilters,
+  type UserListFilters,
+} from '@/features/users/components/user-filters';
 import { UsersTable } from '@/features/users/components/users-table';
 import { useUsers } from '@/features/users/hooks/use-users';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
+
+const PAGE_SIZE = 10;
 
 export default function UsersPage() {
   const [page, setPage] = useState(1);
-  const [limit] = useState(10);
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('all');
-  const [role, setRole] = useState('all');
-  const [companyId, setCompanyId] = useState('all');
+  const [filters, setFilters] = useState<UserListFilters>(EMPTY_USER_FILTERS);
+  const debouncedSearch = useDebouncedValue(filters.search.trim());
 
-  const { data: companiesData } = useCompanies({ page: 1, limit: 100 });
-
-  const params = {
+  const query = useUsers({
     page,
-    limit,
-    search: search.trim() || undefined,
-    status: status === 'all' ? undefined : status,
-    role: role === 'all' ? undefined : role,
-    companyId: companyId === 'all' ? undefined : companyId,
-  };
+    limit: PAGE_SIZE,
+    search: debouncedSearch || undefined,
+    status: filters.status || undefined,
+    role: filters.role || undefined,
+    companyId: filters.companyId || undefined,
+    directionId: filters.directionId || undefined,
+  });
 
-  const { data, isLoading, isError, error, refetch } = useUsers(params);
+  const hasActiveFilters = Boolean(
+    debouncedSearch || filters.status || filters.role || filters.companyId || filters.directionId,
+  );
+  const meta = query.data?.meta;
+
+  const updateFilters = (next: Partial<UserListFilters>) => {
+    setFilters((current) => ({ ...current, ...next }));
+    setPage(1);
+  };
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Utilisateurs"
-        description="Gérez les comptes et leurs rattachements organisationnels."
+        description="Comptes, rôles et rattachements organisationnels."
+        meta={
+          meta ? (
+            <span className="tabular-nums">
+              {meta.total} utilisateur{meta.total > 1 ? 's' : ''}
+              {hasActiveFilters ? ' correspondant aux filtres' : ''}
+            </span>
+          ) : null
+        }
         actions={
-          <Button render={<Link href="/users/new" />}>
-            <Plus className="size-4" />
+          <Link href="/users/new" className={buttonVariants()}>
+            <Plus className="size-4" aria-hidden />
             Nouvel utilisateur
-          </Button>
+          </Link>
         }
       />
 
-      <UserFilters
-        search={search}
-        status={status}
-        role={role}
-        companyId={companyId}
-        companies={companiesData?.data ?? []}
-        onSearchChange={(value) => {
-          setSearch(value);
-          setPage(1);
-        }}
-        onStatusChange={(value) => {
-          setStatus(value);
-          setPage(1);
-        }}
-        onRoleChange={(value) => {
-          setRole(value);
-          setPage(1);
-        }}
-        onCompanyChange={(value) => {
-          setCompanyId(value);
-          setPage(1);
-        }}
-      />
-
-      {isError ? (
+      {query.isError ? (
         <ErrorState
-          message={error instanceof Error ? error.message : undefined}
-          onRetry={() => void refetch()}
+          title="Impossible de charger les utilisateurs"
+          onRetry={() => void query.refetch()}
+          retrying={query.isFetching}
         />
       ) : (
-        <>
-          <UsersTable data={data?.data ?? []} isLoading={isLoading} />
-          {data ? (
-            <PaginationControls
-              page={data.meta.page}
-              totalPages={data.meta.totalPages}
-              total={data.meta.total}
-              onPageChange={setPage}
-            />
-          ) : null}
-        </>
+        <UsersTable
+          data={query.data?.data ?? []}
+          isLoading={query.isLoading}
+          hasActiveFilters={hasActiveFilters}
+          toolbar={<UserFilters value={filters} onChange={updateFilters} />}
+          emptyAction={
+            hasActiveFilters ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setFilters(EMPTY_USER_FILTERS);
+                  setPage(1);
+                }}
+              >
+                Effacer les filtres
+              </Button>
+            ) : (
+              <Link href="/users/new" className={buttonVariants()}>
+                <Plus className="size-4" aria-hidden />
+                Ajouter un utilisateur
+              </Link>
+            )
+          }
+          footer={
+            meta && meta.total > 0 ? (
+              <PaginationControls
+                page={meta.page}
+                totalPages={meta.totalPages}
+                total={meta.total}
+                limit={PAGE_SIZE}
+                onPageChange={setPage}
+              />
+            ) : undefined
+          }
+        />
       )}
     </div>
   );

@@ -332,6 +332,9 @@ export function createApiClient(options: ApiClientOptions) {
         `/api/v1/notifications${toQuery(params)}`,
       ),
 
+    getUnreadNotificationsCount: () =>
+      request<{ count: number }>(options, '/api/v1/notifications/unread-count'),
+
     markNotificationRead: (id: string) =>
       request<Notification>(options, `/api/v1/notifications/${id}/read`, {
         method: 'PATCH',

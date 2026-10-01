@@ -15,6 +15,18 @@ export function useNotifications(page = 1, limit = 20) {
   });
 }
 
+/** Real unread total from the API (not limited to the loaded page). */
+export function useUnreadNotificationsCount() {
+  return useQuery({
+    queryKey: ['notifications', 'unread-count'],
+    queryFn: async () =>
+      (await apiCallWithRefresh((client) => client.getUnreadNotificationsCount())).count,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/** Silent: reading a notification is an implicit action, no toast on success. */
 export function useMarkNotificationRead() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -22,7 +34,6 @@ export function useMarkNotificationRead() {
       apiCallWithRefresh((client) => client.markNotificationRead(id)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['notifications'] });
-      toast.success('Notification marquée comme lue');
     },
     onError: (error: unknown) => {
       toast.error(

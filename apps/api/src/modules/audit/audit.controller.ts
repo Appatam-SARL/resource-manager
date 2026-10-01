@@ -13,11 +13,13 @@ import {
 import { Role, AuditAction } from '@prisma/client';
 import { IsEnum, IsOptional, IsString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
-import { PaginationQueryDto, paginate, paginationArgs } from '../../common/dto/pagination.dto.js';
-import { PrismaService } from '../../database/prisma.service.js';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
+import { PaginationQueryDto } from '../../common/dto/pagination.dto.js';
+import { AuditService } from './audit.service.js';
 
 class AuditQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional()
@@ -42,36 +44,16 @@ class AuditQueryDto extends PaginationQueryDto {
 @Roles(Role.GROUP_ADMIN, Role.COMPANY_ADMIN)
 @Controller('audit')
 export class AuditController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly auditService: AuditService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Lister les journaux d’audit' })
+  @ApiOperation({
+    summary: 'Lister les journaux d’audit',
+    description:
+      'Administrateur groupe : tout le groupe. Administrateur entreprise : actions des utilisateurs de son entreprise.',
+  })
   @ApiOkResponse()
-  async list(@Query() query: AuditQueryDto) {
-    const where = {
-      ...(query.entity ? { entity: query.entity } : {}),
-      ...(query.action ? { action: query.action } : {}),
-      ...(query.userId ? { userId: query.userId } : {}),
-    };
-    const [total, data] = await this.prisma.$transaction([
-      this.prisma.auditLog.count({ where }),
-      this.prisma.auditLog.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        ...paginationArgs(query.page, query.limit),
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-              companyId: true,
-            },
-          },
-        },
-      }),
-    ]);
-    return paginate(data, total, query.page, query.limit);
+  list(@Query() query: AuditQueryDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.auditService.list(query, user);
   }
 }

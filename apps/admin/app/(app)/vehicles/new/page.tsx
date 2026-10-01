@@ -1,11 +1,11 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { ErrorState } from '@/components/shared/error-state';
 import { PageHeader } from '@/components/shared/page-header';
 import { VehicleForm, useCreateVehicle } from '@/features/vehicles';
 import { canManageResources } from '@/lib/reservation-permissions';
 import { useAuth } from '@/providers/auth-provider';
-import { ErrorState } from '@/components/shared/error-state';
 
 export default function NewVehiclePage() {
   const { user } = useAuth();
@@ -22,14 +22,16 @@ export default function NewVehiclePage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       <PageHeader
+        back={{ href: '/vehicles', label: 'Véhicules' }}
         title="Nouveau véhicule"
-        description="Ajoutez un véhicule à une entreprise du Groupe."
+        description="Le véhicule sera immédiatement réservable par les collaborateurs de son entreprise."
       />
       <VehicleForm
         loading={createMutation.isPending}
         submitLabel="Créer le véhicule"
+        cancelHref="/vehicles"
         onSubmit={async (values) => {
           const created = await createMutation.mutateAsync(values);
           router.push(`/vehicles/${created.id}`);

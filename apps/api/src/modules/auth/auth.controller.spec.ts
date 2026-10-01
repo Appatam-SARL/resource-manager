@@ -1,6 +1,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { Role, UserStatus } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
+import { AuthController } from './auth.controller.js';
 import type { AuthenticatedUser } from './types/authenticated-user.type.js';
 
 vi.mock('@nestjs/swagger', () => {
@@ -34,7 +35,6 @@ const authenticatedUser: AuthenticatedUser = {
 
 describe('AuthController / JWT protection', () => {
   it('returns profile via me() without sensitive fields', async () => {
-    const { AuthController } = await import('./auth.controller.js');
     const authService = {
       me: vi.fn().mockResolvedValue(authenticatedUser),
       login: vi.fn(),

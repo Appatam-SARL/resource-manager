@@ -1,14 +1,29 @@
-import { Redirect, Tabs } from 'expo-router';
-import { Calendar, Bell, Home, CalendarDays, User } from 'lucide-react-native';
+import { Redirect, Tabs, useSegments } from 'expo-router';
+import { CommonActions, type NavigationState } from 'expo-router/react-navigation';
+import { Calendar, Home, CalendarDays } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/features/auth/auth-provider';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { TabBarIcon } from '@/components/layout/tab-bar-icon';
-import { useUnreadNotificationsCount } from '@/features/notifications/hooks/use-notifications';
+import { usePushNotifications } from '@/features/notifications/hooks/use-push-notifications';
+import { useRealtimeSync } from '@/hooks/use-realtime-sync';
 import { colors } from '@/constants/theme';
 
 export default function AppLayout() {
   const { user, isLoading } = useAuth();
-  const unreadQuery = useUnreadNotificationsCount(!isLoading && Boolean(user));
+  usePushNotifications(user?.id);
+  useRealtimeSync(user?.id);
+  const insets = useSafeAreaInsets();
+  const segments = useSegments();
+  const tabBarBottomPadding = Math.max(insets.bottom, 8);
+  const tabBarStyle = {
+    backgroundColor: colors.white,
+    borderTopColor: colors.border,
+    height: 52 + tabBarBottomPadding,
+    paddingBottom: tabBarBottomPadding,
+    paddingTop: 6,
+  };
+  const isCreatingReservation = segments.at(-1) === 'new';
 
   if (isLoading) {
     return <LoadingState fullScreen />;
@@ -18,21 +33,14 @@ export default function AppLayout() {
     return <Redirect href="/(auth)/login" />;
   }
 
-  const unread = unreadQuery.data ?? 0;
-
   return (
     <Tabs
+      backBehavior="history"
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
-        tabBarStyle: {
-          backgroundColor: colors.white,
-          borderTopColor: colors.border,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 6,
-        },
+        tabBarStyle,
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: '600',
@@ -53,7 +61,24 @@ export default function AppLayout() {
           title: 'Réservations',
           tabBarIcon: ({ color }) => <TabBarIcon Icon={Calendar} color={color} />,
           tabBarAccessibilityLabel: 'Réservations',
+          tabBarStyle: isCreatingReservation ? { display: 'none' } : tabBarStyle,
         }}
+        listeners={({ navigation, route }) => ({
+          // The nested stack may keep "new" or "[id]" on top (opened from Accueil, Calendrier…):
+          // the tab must always land on the reservations list.
+          tabPress: (event) => {
+            const tabs: NavigationState = navigation.getState();
+            const stack = tabs.routes.find((tab) => tab.key === route.key)?.state;
+            const topRoute = stack?.routes[stack.index ?? stack.routes.length - 1];
+            if (!stack?.key || (stack.routes.length === 1 && topRoute?.name === 'index')) return;
+            event.preventDefault();
+            navigation.dispatch({
+              ...CommonActions.reset({ index: 0, routes: [{ name: 'index' }] }),
+              target: stack.key,
+            });
+            navigation.navigate('reservations');
+          },
+        })}
       />
       <Tabs.Screen
         name="calendar"
@@ -65,20 +90,11 @@ export default function AppLayout() {
       />
       <Tabs.Screen
         name="notifications"
-        options={{
-          title: 'Notifications',
-          tabBarBadge: unread > 0 ? unread : undefined,
-          tabBarIcon: ({ color }) => <TabBarIcon Icon={Bell} color={color} />,
-          tabBarAccessibilityLabel: 'Notifications',
-        }}
+        options={{ href: null, tabBarStyle: { display: 'none' } }}
       />
       <Tabs.Screen
         name="profile"
-        options={{
-          title: 'Profil',
-          tabBarIcon: ({ color }) => <TabBarIcon Icon={User} color={color} />,
-          tabBarAccessibilityLabel: 'Profil',
-        }}
+        options={{ href: null, tabBarStyle: { display: 'none' } }}
       />
       <Tabs.Screen name="vehicles" options={{ href: null }} />
       <Tabs.Screen name="rooms" options={{ href: null }} />

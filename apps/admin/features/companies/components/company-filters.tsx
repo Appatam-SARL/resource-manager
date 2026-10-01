@@ -1,52 +1,40 @@
 'use client';
 
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { FilterChips, SearchInput, type FilterChipOption } from '@/components/shared/data-toolbar';
 
-type CompanyFiltersProps = {
+export type CompanyListFilters = {
   search: string;
-  status: string;
-  onSearchChange: (value: string) => void;
-  onStatusChange: (value: string) => void;
+  status: '' | 'ACTIVE' | 'INACTIVE';
 };
 
-export function CompanyFilters({
-  search,
-  status,
-  onSearchChange,
-  onStatusChange,
-}: CompanyFiltersProps) {
+export const EMPTY_COMPANY_FILTERS: CompanyListFilters = { search: '', status: '' };
+
+const STATUS_OPTIONS: FilterChipOption<'ALL' | 'ACTIVE' | 'INACTIVE'>[] = [
+  { value: 'ALL', label: 'Toutes' },
+  { value: 'ACTIVE', label: 'Actives' },
+  { value: 'INACTIVE', label: 'Inactives' },
+];
+
+type CompanyFiltersProps = {
+  value: CompanyListFilters;
+  onChange: (next: Partial<CompanyListFilters>) => void;
+};
+
+export function CompanyFilters({ value, onChange }: CompanyFiltersProps) {
   return (
-    <div className="flex flex-col gap-3 rounded-2xl bg-card p-4 ring-1 ring-border/60 sm:flex-row sm:items-end">
-      <div className="min-w-0 flex-1 space-y-2">
-        <Label htmlFor="company-search">Recherche</Label>
-        <Input
-          id="company-search"
-          placeholder="Nom ou code…"
-          value={search}
-          onChange={(event) => onSearchChange(event.target.value)}
-        />
-      </div>
-      <div className="w-full space-y-2 sm:w-48">
-        <Label>Statut</Label>
-        <Select value={status} onValueChange={(value) => onStatusChange(value ?? 'all')}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Tous les statuts" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Tous</SelectItem>
-            <SelectItem value="ACTIVE">Actif</SelectItem>
-            <SelectItem value="INACTIVE">Inactif</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+    <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+      <SearchInput
+        value={value.search}
+        onChange={(search) => onChange({ search })}
+        placeholder="Nom ou code…"
+        className="lg:max-w-sm"
+      />
+      <FilterChips
+        label="Filtrer par statut"
+        options={STATUS_OPTIONS}
+        value={value.status || 'ALL'}
+        onChange={(status) => onChange({ status: status === 'ALL' ? '' : status })}
+      />
     </div>
   );
 }

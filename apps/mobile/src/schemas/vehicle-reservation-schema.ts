@@ -22,13 +22,21 @@ export const vehicleReservationSchema = z
     startTime: z.string().regex(timeRegex, 'Heure invalide (HH:mm)'),
     endDate: z.string().regex(dateRegex, 'Date invalide (AAAA-MM-JJ)'),
     endTime: z.string().regex(timeRegex, 'Heure invalide (HH:mm)'),
-    destination: z.string().min(1, 'Destination requise'),
-    missionReason: z.string().min(1, 'Motif de mission requis'),
+    destination: z
+      .string()
+      .trim()
+      .min(1, 'Destination requise')
+      .max(200, '200 caractères maximum'),
+    missionReason: z
+      .string()
+      .trim()
+      .min(1, 'Motif du déplacement requis')
+      .max(500, '500 caractères maximum'),
     passengerCount: z
       .number({ error: 'Nombre de passagers requis' })
       .int('Nombre entier requis')
       .positive('Au moins 1 passager'),
-    comment: z.string().optional(),
+    comment: z.string().max(1000, '1000 caractères maximum').optional(),
   })
   .superRefine((data, ctx) => {
     if (!compareDateTime(data.startDate, data.startTime, data.endDate, data.endTime)) {

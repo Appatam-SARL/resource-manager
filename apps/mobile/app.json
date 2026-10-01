@@ -37,11 +37,26 @@
           "imageWidth": 76
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/android-icon-monochrome.png",
+          "color": "#1B4332",
+          "defaultChannel": "general"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "56445b19-ba59-4541-9b91-e16f0a6e9013"
+      }
+    },
+    "owner": "appatamsarl"
   }
 }

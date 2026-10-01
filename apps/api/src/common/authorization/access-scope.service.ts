@@ -121,6 +121,29 @@ export class AccessScopeService {
     return { AND: [base, extra] };
   }
 
+  canViewReservation(
+    user: AuthenticatedUser,
+    reservation: {
+      companyId: string;
+      directionId: string | null;
+      userId: string;
+    },
+  ): boolean {
+    if (user.role === Role.GROUP_ADMIN) return true;
+    if (user.role === Role.COMPANY_ADMIN) {
+      return user.companyId === reservation.companyId;
+    }
+    if (user.role === Role.MANAGER) {
+      if (user.companyId !== reservation.companyId) return false;
+      if (!user.directionId) return true;
+      return (
+        reservation.directionId === user.directionId ||
+        reservation.userId === user.id
+      );
+    }
+    return reservation.userId === user.id;
+  }
+
   canApproveReservation(
     user: AuthenticatedUser,
     reservation: {

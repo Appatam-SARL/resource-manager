@@ -14,7 +14,7 @@ export type NavItem = {
 };
 
 export const MENU_ITEMS: NavItem[] = [
-  { href: '/dashboard', label: 'Dashboard' },
+  { href: '/dashboard', label: 'Tableau de bord' },
   { href: '/group', label: 'Groupe', roles: ['GROUP_ADMIN'] },
   {
     href: '/companies',

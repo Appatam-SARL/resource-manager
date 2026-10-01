@@ -1,266 +1,196 @@
-import { useCallback } from 'react';
-import {
-  FlatList,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import type { ReactNode } from 'react';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { Car, DoorOpen } from 'lucide-react-native';
-import type { Reservation } from '@resource-manager/types';
+import { ArrowRight, Building2 } from 'lucide-react-native';
 import { useAuth } from '@/features/auth/auth-provider';
-import {
-  useDashboardReservations,
-  useDashboardSummary,
-} from '@/features/dashboard/hooks/use-dashboard';
+import { useNow } from '@/hooks/use-now';
+import { useHomeOverview } from '@/features/home/hooks/use-home-overview';
+import { getGreeting } from '@/features/home/lib/home';
+import { HomeHeroCard, HomeHeroEmpty } from '@/features/home/components/home-hero-card';
+import { HomeQuickActions } from '@/features/home/components/home-quick-actions';
+import { HomeActivityEmpty, HomeActivityRow } from '@/features/home/components/home-activity';
+import { HomeActivitySkeleton, HomeErrorCard, HomeHeroSkeleton } from '@/features/home/components/home-states';
 import { Screen } from '@/components/ui/Screen';
-import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { ErrorState } from '@/components/ui/ErrorState';
-import { LoadingState } from '@/components/ui/LoadingState';
-import { FadeIn, StaggerItem } from '@/components/motion';
-import { formatDateTime } from '@/lib/format';
+import { AppHeader } from '@/components/layout/app-header';
+import { openNewReservation } from '@/components/layout/header-add-button';
+import { FadeIn } from '@/components/motion';
 import { colors, radius, spacing } from '@/constants/theme';
 
-function reservationTitle(item: Reservation): string {
-  if (item.resourceType === 'VEHICLE' && item.vehicle) {
-    return `${item.vehicle.brand} ${item.vehicle.model}`;
-  }
-  if (item.resourceType === 'ROOM' && item.room) {
-    return item.room.name;
-  }
-  return item.resourceType === 'VEHICLE' ? 'Véhicule' : 'Salle';
+function openReservation(id: string) {
+  router.push(`/(app)/reservations/${id}`);
 }
 
-export default function DashboardScreen() {
+export default function HomeScreen() {
   const { user } = useAuth();
-  const summaryQuery = useDashboardSummary();
-  const reservationsQuery = useDashboardReservations(8);
+  const now = useNow(60_000);
+  const home = useHomeOverview(user?.id, now);
+  const overview = home.overview;
+  const showContent = !home.isLoading && overview !== null;
 
-  const refreshing = summaryQuery.isRefetching || reservationsQuery.isRefetching;
+  const title = user?.firstName ? `${getGreeting(now)}, ${user.firstName}` : getGreeting(now);
+  const organization = user
+    ? [user.company.name, user.direction?.name].filter(Boolean).join(' · ')
+    : null;
 
-  const onRefresh = useCallback(() => {
-    void summaryQuery.refetch();
-    void reservationsQuery.refetch();
-  }, [summaryQuery, reservationsQuery]);
-
-  if ((summaryQuery.isLoading || reservationsQuery.isLoading) && !summaryQuery.data) {
-    return (
-      <Screen>
-        <LoadingState fullScreen />
-      </Screen>
+  let hero: ReactNode;
+  let activity: ReactNode;
+  if (home.isError) {
+    hero = <HomeErrorCard onRetry={() => void home.refresh()} retrying={home.isRetrying} />;
+    activity = null;
+  } else if (!showContent) {
+    hero = <HomeHeroSkeleton />;
+    activity = <HomeActivitySkeleton />;
+  } else {
+    hero = overview.highlight ? (
+      <HomeHeroCard highlight={overview.highlight} onPress={openReservation} />
+    ) : (
+      <HomeHeroEmpty onCreate={openNewReservation} />
     );
+    activity =
+      overview.activity.length > 0 ? (
+        <View style={styles.list}>
+          {overview.activity.map((entry) => (
+            <HomeActivityRow key={entry.id} entry={entry} onPress={openReservation} />
+          ))}
+        </View>
+      ) : (
+        <HomeActivityEmpty />
+      );
   }
-
-  if (summaryQuery.isError) {
-    return (
-      <Screen>
-        <ErrorState
-          message="Impossible de charger le tableau de bord."
-          onRetry={() => void summaryQuery.refetch()}
-        />
-      </Screen>
-    );
-  }
-
-  const summary = summaryQuery.data;
-  const reservations = reservationsQuery.data ?? [];
 
   return (
     <Screen padded={false}>
-      <FlatList
-        data={reservations}
-        keyExtractor={(item) => item.id}
+      <AppHeader title={title} subtitle="Votre espace de réservation" />
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
+            refreshing={home.refreshing}
+            onRefresh={() => void home.refresh()}
             tintColor={colors.primary}
+            colors={[colors.primary]}
           />
         }
-        contentContainerStyle={styles.content}
-        ListHeaderComponent={
-          <FadeIn>
-          <View style={styles.headerBlock}>
-            <Text style={styles.greeting}>Bonjour {user?.firstName}</Text>
-            <Text style={styles.org}>
-              {user?.company.name}
-              {user?.direction ? ` · ${user.direction.name}` : ''}
-            </Text>
-
-            <View style={styles.statsRow}>
-              <StaggerItem index={0} style={{ flex: 1 }}>
-              <Card style={styles.statCard}>
-                <Text style={styles.statValue}>{summary?.reservations.pending ?? 0}</Text>
-                <Text style={styles.statLabel}>En attente</Text>
-              </Card>
-              </StaggerItem>
-              <StaggerItem index={1} style={{ flex: 1 }}>
-              <Card style={styles.statCard}>
-                <Text style={styles.statValue}>{summary?.reservations.approved ?? 0}</Text>
-                <Text style={styles.statLabel}>Approuvées</Text>
-              </Card>
-              </StaggerItem>
-            </View>
-
-            <View style={styles.ctaRow}>
-              <Button
-                title="Réserver véhicule"
-                onPress={() => router.push('/(app)/reservations/new?type=VEHICLE')}
-                style={styles.cta}
-                accessibilityLabel="Réserver un véhicule"
-              />
-              <Button
-                title="Réserver salle"
-                variant="outline"
-                onPress={() => router.push('/(app)/reservations/new?type=ROOM')}
-                style={styles.cta}
-                accessibilityLabel="Réserver une salle"
-              />
-            </View>
-
-            <View style={styles.quickLinks}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Voir les véhicules"
-                style={styles.quickLink}
-                onPress={() => router.push('/(app)/vehicles')}
-              >
-                <Car size={20} color={colors.primary} />
-                <Text style={styles.quickLinkText}>Véhicules</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Voir les salles"
-                style={styles.quickLink}
-                onPress={() => router.push('/(app)/rooms')}
-              >
-                <DoorOpen size={20} color={colors.primary} />
-                <Text style={styles.quickLinkText}>Salles</Text>
-              </Pressable>
-            </View>
-
-            <Text style={styles.sectionTitle}>Mes prochaines réservations</Text>
-          </View>
-          </FadeIn>
-        }
-        ListEmptyComponent={
-          <EmptyState
-            title="Aucune réservation à venir"
-            description="Créez une réservation de véhicule ou de salle pour commencer."
-          />
-        }
-        renderItem={({ item, index }) => (
-          <StaggerItem index={index}>
-          <Card
-            style={styles.reservationCard}
-            onPress={() => router.push(`/(app)/reservations/${item.id}`)}
-            accessibilityLabel={`Réservation ${reservationTitle(item)}`}
+      >
+        {organization ? (
+          <View
+            style={styles.organization}
+            accessible
+            accessibilityLabel={`Périmètre : ${organization}`}
           >
-            <View style={styles.reservationHeader}>
-              <Text style={styles.reservationTitle}>{reservationTitle(item)}</Text>
-              <Badge status={item.status} />
-            </View>
-            <Text style={styles.reservationMeta}>
-              {formatDateTime(item.startAt)} → {formatDateTime(item.endAt)}
+            <Building2 size={14} color={colors.primary} />
+            <Text style={styles.organizationText} numberOfLines={1}>
+              {organization}
             </Text>
-          </Card>
-          </StaggerItem>
-        )}
-      />
+          </View>
+        ) : null}
+
+        <FadeIn>{hero}</FadeIn>
+
+        <FadeIn delay={80} style={styles.section}>
+          <Text style={styles.sectionTitle} accessibilityRole="header">
+            Actions rapides
+          </Text>
+          <HomeQuickActions />
+        </FadeIn>
+
+        {activity ? (
+          <FadeIn delay={160} style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle} accessibilityRole="header">
+                Activité récente
+              </Text>
+              {showContent && overview.pendingCount > 0 ? (
+                <Text style={styles.pendingPill}>
+                  {overview.pendingCount} en attente
+                </Text>
+              ) : null}
+            </View>
+            {activity}
+            {showContent ? (
+              <Pressable
+                accessibilityRole="link"
+                accessibilityLabel="Voir toutes mes réservations"
+                onPress={() => router.push('/(app)/reservations')}
+                hitSlop={6}
+                style={({ pressed }) => [styles.allLink, pressed && styles.pressed]}
+              >
+                <Text style={styles.allLinkText}>Voir toutes mes réservations</Text>
+                <ArrowRight size={16} color={colors.primary} />
+              </Pressable>
+            ) : null}
+          </FadeIn>
+        ) : null}
+      </ScrollView>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   content: {
+    gap: spacing.xl,
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xxl,
-    paddingTop: spacing.md,
   },
-  headerBlock: {
-    gap: spacing.md,
-    marginBottom: spacing.md,
-  },
-  greeting: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: colors.text,
-  },
-  org: {
-    fontSize: 14,
-    color: colors.textMuted,
-    marginTop: -spacing.sm,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  statCard: {
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  statValue: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: colors.primary,
-  },
-  statLabel: {
-    fontSize: 13,
-    color: colors.textMuted,
-  },
-  ctaRow: {
-    gap: spacing.sm,
-  },
-  cta: {
-    width: '100%',
-  },
-  quickLinks: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  quickLink: {
-    flex: 1,
+  organization: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
+    alignSelf: 'flex-start',
+    gap: 6,
+    maxWidth: '100%',
+    marginBottom: -spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.xl,
     backgroundColor: colors.primaryMuted,
-    borderRadius: radius.lg,
-    paddingVertical: spacing.md,
   },
-  quickLinkText: {
-    fontWeight: '700',
+  organizationText: {
+    flexShrink: 1,
+    fontSize: 13,
+    fontWeight: '600',
     color: colors.primary,
+  },
+  section: {
+    gap: spacing.md,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: colors.text,
-    marginTop: spacing.sm,
   },
-  reservationCard: {
-    marginBottom: spacing.md,
-    gap: spacing.sm,
-  },
-  reservationHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  reservationTitle: {
-    flex: 1,
-    fontSize: 16,
+  pendingPill: {
+    fontSize: 12,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.warning,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: radius.xl,
+    backgroundColor: '#FEF3C7',
+    overflow: 'hidden',
   },
-  reservationMeta: {
-    fontSize: 13,
-    color: colors.textMuted,
+  list: {
+    gap: spacing.sm,
+  },
+  allLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: spacing.sm,
+  },
+  allLinkText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  pressed: {
+    opacity: 0.7,
   },
 });

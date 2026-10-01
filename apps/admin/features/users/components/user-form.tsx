@@ -1,25 +1,18 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useCallback, useState } from 'react';
+import Link from 'next/link';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import type {
-  Company,
-  Direction,
-  Role,
-  User,
-} from '@resource-manager/types';
-import { Button } from '@/components/ui/button';
+import type { User } from '@resource-manager/types';
+import { CompanyField } from '@/components/forms/company-field';
+import { FormField } from '@/components/forms/form-field';
+import { FormActions, FormCard, FormSection } from '@/components/forms/form-layout';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { useDirections } from '@/features/directions/hooks/use-directions';
+import { DirectionField } from '@/features/users/components/direction-field';
+import { RoleSelector } from '@/features/users/components/role-selector';
+import { assignableRoles, directionScopeHint } from '@/features/users/lib/user-roles';
 import {
   createUserSchema,
   updateUserSchema,
@@ -28,20 +21,13 @@ import {
   type CreateUserFormValues,
   type UpdateUserFormValues,
 } from '@/features/users/schemas/user-schema';
-import { ROLE_LABELS } from '@/lib/rbac';
-
-const ROLES: Role[] = [
-  'GROUP_ADMIN',
-  'COMPANY_ADMIN',
-  'MANAGER',
-  'EMPLOYEE',
-];
+import { useAuth } from '@/providers/auth-provider';
 
 type UserFormCreateProps = {
   mode: 'create';
-  companies: Company[];
   onSubmit: (values: ReturnType<typeof toCreateUserPayload>) => Promise<void>;
   submitLabel?: string;
+  cancelHref?: string;
 };
 
 type UserFormEditProps = {
@@ -49,6 +35,9 @@ type UserFormEditProps = {
   user: User;
   onSubmit: (values: ReturnType<typeof toUpdateUserPayload>) => Promise<void>;
   submitLabel?: string;
+  cancelHref?: string;
+  /** Account the current user is not allowed to manage: fields shown, not editable. */
+  readOnly?: boolean;
 };
 
 type UserFormProps = UserFormCreateProps | UserFormEditProps;
@@ -57,14 +46,23 @@ export function UserForm(props: UserFormProps) {
   if (props.mode === 'create') {
     return <CreateUserForm {...props} />;
   }
-  return <EditUserForm {...props} />;
+  return <EditUserForm key={props.user.updatedAt} {...props} />;
 }
 
-function CreateUserForm({
-  companies,
-  onSubmit,
-  submitLabel,
-}: UserFormCreateProps) {
+function CancelLink({ href }: { href?: string }) {
+  if (!href) return null;
+  return (
+    <Link href={href} className={buttonVariants({ variant: 'outline' })}>
+      Annuler
+    </Link>
+  );
+}
+
+function CreateUserForm({ onSubmit, submitLabel, cancelHref }: UserFormCreateProps) {
+  const { user: actor } = useAuth();
+  const isGroupAdmin = actor?.role === 'GROUP_ADMIN';
+  const [hasDirections, setHasDirections] = useState(false);
+
   const {
     register,
     control,
@@ -79,208 +77,110 @@ function CreateUserForm({
       firstName: '',
       lastName: '',
       role: 'EMPLOYEE',
-      companyId: '',
+      companyId: isGroupAdmin ? '' : (actor?.companyId ?? ''),
       directionId: null,
     },
   });
 
   const companyId = useWatch({ control, name: 'companyId' });
-
-  const { data: directionsData, isFetching: directionsLoading } = useDirections(
-    {
-      companyId: companyId || undefined,
-      page: 1,
-      limit: 100,
-      status: 'ACTIVE',
-    },
-    { enabled: Boolean(companyId) },
-  );
-
-  const directions: Direction[] = companyId
-    ? (directionsData?.data ?? [])
-    : [];
-  const hasDirections = directions.length > 0;
-
-  useEffect(() => {
-    setValue('directionId', null);
-  }, [companyId, setValue]);
+  const role = useWatch({ control, name: 'role' });
+  const directionId = useWatch({ control, name: 'directionId' });
 
   return (
-    <form
-      className="space-y-4"
-      onSubmit={handleSubmit(async (values) => {
-        await onSubmit(
-          toCreateUserPayload({
-            ...values,
-            directionId: hasDirections ? values.directionId || null : null,
-          }),
-        );
-      })}
-    >
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label htmlFor="user-firstName">Prénom</Label>
-          <Input
-            id="user-firstName"
-            disabled={isSubmitting}
-            aria-invalid={Boolean(errors.firstName)}
-            {...register('firstName')}
-          />
-          {errors.firstName ? (
-            <p className="text-sm text-destructive">{errors.firstName.message}</p>
-          ) : null}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="user-lastName">Nom</Label>
-          <Input
-            id="user-lastName"
-            disabled={isSubmitting}
-            aria-invalid={Boolean(errors.lastName)}
-            {...register('lastName')}
-          />
-          {errors.lastName ? (
-            <p className="text-sm text-destructive">{errors.lastName.message}</p>
-          ) : null}
-        </div>
-      </div>
+    <FormCard>
+      <form
+        noValidate
+        onSubmit={handleSubmit(async (values) => {
+          await onSubmit(
+            toCreateUserPayload({ ...values, directionId: hasDirections ? values.directionId || null : null }),
+          );
+        })}
+      >
+        <FormSection title="Identité" description="Nom affiché dans les réservations et les notifications.">
+          <FormField label="Prénom" htmlFor="user-firstName" error={errors.firstName?.message} required>
+            <Input id="user-firstName" autoComplete="given-name" disabled={isSubmitting} aria-invalid={Boolean(errors.firstName)} {...register('firstName')} />
+          </FormField>
+          <FormField label="Nom" htmlFor="user-lastName" error={errors.lastName?.message} required>
+            <Input id="user-lastName" autoComplete="family-name" disabled={isSubmitting} aria-invalid={Boolean(errors.lastName)} {...register('lastName')} />
+          </FormField>
+        </FormSection>
 
-      <div className="space-y-2">
-        <Label htmlFor="user-email">E-mail</Label>
-        <Input
-          id="user-email"
-          type="email"
-          disabled={isSubmitting}
-          aria-invalid={Boolean(errors.email)}
-          {...register('email')}
-        />
-        {errors.email ? (
-          <p className="text-sm text-destructive">{errors.email.message}</p>
-        ) : null}
-      </div>
+        <FormSection title="Accès" description="Identifiants de connexion. Communiquez le mot de passe par un canal sécurisé.">
+          <FormField label="Adresse e-mail" htmlFor="user-email" error={errors.email?.message} required wide>
+            <Input id="user-email" type="email" autoComplete="off" disabled={isSubmitting} aria-invalid={Boolean(errors.email)} {...register('email')} />
+          </FormField>
+          <FormField
+            label="Mot de passe provisoire"
+            htmlFor="user-password"
+            error={errors.password?.message}
+            hint="8 caractères minimum."
+            required
+            wide
+          >
+            <Input id="user-password" type="password" autoComplete="new-password" disabled={isSubmitting} aria-invalid={Boolean(errors.password)} {...register('password')} />
+          </FormField>
+        </FormSection>
 
-      <div className="space-y-2">
-        <Label htmlFor="user-password">Mot de passe</Label>
-        <Input
-          id="user-password"
-          type="password"
-          autoComplete="new-password"
-          disabled={isSubmitting}
-          aria-invalid={Boolean(errors.password)}
-          {...register('password')}
-        />
-        {errors.password ? (
-          <p className="text-sm text-destructive">{errors.password.message}</p>
-        ) : null}
-      </div>
-
-      <div className="space-y-2">
-        <Label>Entreprise</Label>
-        <Controller
-          name="companyId"
-          control={control}
-          render={({ field }) => (
-            <Select
-              value={field.value || undefined}
-              onValueChange={(value) => field.onChange(value ?? '')}
-            >
-              <SelectTrigger
-                className="w-full"
-                aria-invalid={Boolean(errors.companyId)}
-              >
-                <SelectValue placeholder="Sélectionner une entreprise" />
-              </SelectTrigger>
-              <SelectContent>
-                {companies.map((company) => (
-                  <SelectItem key={company.id} value={company.id}>
-                    {company.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        />
-        {errors.companyId ? (
-          <p className="text-sm text-destructive">{errors.companyId.message}</p>
-        ) : null}
-      </div>
-
-      {companyId && hasDirections ? (
-        <div className="space-y-2">
-          <Label>Direction (optionnelle)</Label>
+        <FormSection title="Organisation" description="Entreprise obligatoire ; direction uniquement si l’entreprise en possède.">
           <Controller
-            name="directionId"
+            name="companyId"
             control={control}
             render={({ field }) => (
-              <Select
-                value={field.value ?? 'none'}
-                onValueChange={(value) =>
-                  field.onChange(value === 'none' ? null : (value ?? null))
-                }
-                disabled={directionsLoading}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Aucune direction" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Aucune direction</SelectItem>
-                  {directions.map((direction) => (
-                    <SelectItem key={direction.id} value={direction.id}>
-                      {direction.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <CompanyField
+                value={field.value}
+                onChange={(next) => {
+                  field.onChange(next);
+                  setValue('directionId', null);
+                }}
+                editable={isGroupAdmin}
+                companyName={actor?.company.name}
+                hint={isGroupAdmin ? undefined : 'Les utilisateurs sont créés dans votre entreprise.'}
+                error={errors.companyId?.message}
+              />
             )}
           />
-        </div>
-      ) : null}
+          <DirectionField
+            companyId={companyId}
+            value={directionId}
+            onChange={(next) => setValue('directionId', next, { shouldDirty: true })}
+            onAvailabilityChange={setHasDirections}
+            hint={directionScopeHint(role, Boolean(directionId))}
+          />
+        </FormSection>
 
-      {companyId && !directionsLoading && !hasDirections ? (
-        <p className="rounded-xl bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-          Cette entreprise n’a pas de direction. L’utilisateur sera rattaché
-          directement à l’entreprise.
-        </p>
-      ) : null}
+        <FormSection title="Rôle" description="Détermine ce que l’utilisateur peut voir et faire.">
+          <Controller
+            name="role"
+            control={control}
+            render={({ field }) => (
+              <RoleSelector
+                value={field.value}
+                onChange={field.onChange}
+                roles={actor ? assignableRoles(actor.role) : []}
+                disabled={isSubmitting}
+              />
+            )}
+          />
+        </FormSection>
 
-      <div className="space-y-2">
-        <Label>Rôle</Label>
-        <Controller
-          name="role"
-          control={control}
-          render={({ field }) => (
-            <Select
-              value={field.value}
-              onValueChange={(value) =>
-                field.onChange((value as Role | null) ?? 'EMPLOYEE')
-              }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Sélectionner un rôle" />
-              </SelectTrigger>
-              <SelectContent>
-                {ROLES.map((role) => (
-                  <SelectItem key={role} value={role}>
-                    {ROLE_LABELS[role]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        />
-      </div>
-
-      <div className="flex justify-end">
-        <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting
-            ? 'Enregistrement…'
-            : (submitLabel ?? 'Créer l’utilisateur')}
-        </Button>
-      </div>
-    </form>
+        <FormActions>
+          <CancelLink href={cancelHref} />
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? 'Création…' : (submitLabel ?? 'Créer l’utilisateur')}
+          </Button>
+        </FormActions>
+      </form>
+    </FormCard>
   );
 }
 
-function EditUserForm({ user, onSubmit, submitLabel }: UserFormEditProps) {
+function EditUserForm({ user, onSubmit, submitLabel, cancelHref, readOnly = false }: UserFormEditProps) {
+  const { user: actor } = useAuth();
+  const [hasDirections, setHasDirections] = useState(Boolean(user.directionId));
+  const isSelf = actor?.id === user.id;
+  const actorRoles = actor ? assignableRoles(actor.role) : [];
+  const canChangeRole = !readOnly && !isSelf && actorRoles.includes(user.role);
+
   const {
     register,
     control,
@@ -300,176 +200,106 @@ function EditUserForm({ user, onSubmit, submitLabel }: UserFormEditProps) {
     },
   });
 
-  const { data: directionsData, isFetching: directionsLoading } = useDirections({
-    companyId: user.companyId,
-    page: 1,
-    limit: 100,
-    status: 'ACTIVE',
-  });
+  const role = useWatch({ control, name: 'role' });
+  const directionId = useWatch({ control, name: 'directionId' });
 
-  const directions: Direction[] = directionsData?.data ?? [];
-  const hasDirections = directions.length > 0;
-
-  useEffect(() => {
-    reset({
-      email: user.email,
-      password: '',
-      firstName: user.firstName,
-      lastName: user.lastName,
-      role: user.role,
-      directionId: user.directionId,
-    });
-  }, [user, reset]);
-
-  useEffect(() => {
-    if (!hasDirections && !directionsLoading) {
-      setValue('directionId', null);
-    }
-  }, [hasDirections, directionsLoading, setValue]);
+  const handleAvailability = useCallback(
+    (available: boolean) => {
+      setHasDirections(available);
+      if (!available) setValue('directionId', null);
+    },
+    [setValue],
+  );
 
   return (
-    <form
-      className="space-y-4"
-      onSubmit={handleSubmit(async (values) => {
-        await onSubmit(
-          toUpdateUserPayload({
-            ...values,
-            directionId: hasDirections ? values.directionId || null : null,
-          }),
-        );
-      })}
-    >
-      <div className="rounded-xl bg-muted/40 px-3 py-2 text-sm">
-        <span className="text-muted-foreground">Entreprise : </span>
-        <span className="font-medium">{user.company?.name ?? '—'}</span>
-      </div>
+    <FormCard>
+      <form
+        noValidate
+        onSubmit={handleSubmit(async (values) => {
+          try {
+            await onSubmit(
+              toUpdateUserPayload({ ...values, directionId: hasDirections ? values.directionId || null : null }),
+            );
+            reset({ ...values, password: '' });
+          } catch {
+            // The page reports the error; keep the user's input.
+          }
+        })}
+      >
+        <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0">
+        <FormSection title="Identité">
+          <FormField label="Prénom" htmlFor="edit-user-firstName" error={errors.firstName?.message} required>
+            <Input id="edit-user-firstName" disabled={isSubmitting} aria-invalid={Boolean(errors.firstName)} {...register('firstName')} />
+          </FormField>
+          <FormField label="Nom" htmlFor="edit-user-lastName" error={errors.lastName?.message} required>
+            <Input id="edit-user-lastName" disabled={isSubmitting} aria-invalid={Boolean(errors.lastName)} {...register('lastName')} />
+          </FormField>
+        </FormSection>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label htmlFor="edit-user-firstName">Prénom</Label>
-          <Input
-            id="edit-user-firstName"
-            disabled={isSubmitting}
-            aria-invalid={Boolean(errors.firstName)}
-            {...register('firstName')}
+        <FormSection title="Accès">
+          <FormField label="Adresse e-mail" htmlFor="edit-user-email" error={errors.email?.message} required wide>
+            <Input id="edit-user-email" type="email" autoComplete="off" disabled={isSubmitting} aria-invalid={Boolean(errors.email)} {...register('email')} />
+          </FormField>
+          {readOnly ? null : (
+            <FormField
+              label="Nouveau mot de passe"
+              htmlFor="edit-user-password"
+              error={errors.password?.message}
+              hint="Laissez vide pour conserver le mot de passe actuel."
+              wide
+            >
+              <Input id="edit-user-password" type="password" autoComplete="new-password" disabled={isSubmitting} aria-invalid={Boolean(errors.password)} {...register('password')} />
+            </FormField>
+          )}
+        </FormSection>
+
+        <FormSection title="Organisation">
+          <CompanyField value={user.companyId} onChange={() => undefined} editable={false} companyName={user.company?.name} />
+          <DirectionField
+            companyId={user.companyId}
+            value={directionId}
+            onChange={(next) => setValue('directionId', next, { shouldDirty: true })}
+            onAvailabilityChange={handleAvailability}
+            hint={directionScopeHint(role, Boolean(directionId))}
           />
-          {errors.firstName ? (
-            <p className="text-sm text-destructive">{errors.firstName.message}</p>
-          ) : null}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="edit-user-lastName">Nom</Label>
-          <Input
-            id="edit-user-lastName"
-            disabled={isSubmitting}
-            aria-invalid={Boolean(errors.lastName)}
-            {...register('lastName')}
-          />
-          {errors.lastName ? (
-            <p className="text-sm text-destructive">{errors.lastName.message}</p>
-          ) : null}
-        </div>
-      </div>
+        </FormSection>
 
-      <div className="space-y-2">
-        <Label htmlFor="edit-user-email">E-mail</Label>
-        <Input
-          id="edit-user-email"
-          type="email"
-          disabled={isSubmitting}
-          aria-invalid={Boolean(errors.email)}
-          {...register('email')}
-        />
-        {errors.email ? (
-          <p className="text-sm text-destructive">{errors.email.message}</p>
-        ) : null}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="edit-user-password">
-          Nouveau mot de passe (optionnel)
-        </Label>
-        <Input
-          id="edit-user-password"
-          type="password"
-          autoComplete="new-password"
-          disabled={isSubmitting}
-          aria-invalid={Boolean(errors.password)}
-          {...register('password')}
-        />
-        {errors.password ? (
-          <p className="text-sm text-destructive">{errors.password.message}</p>
-        ) : null}
-      </div>
-
-      {hasDirections ? (
-        <div className="space-y-2">
-          <Label>Direction (optionnelle)</Label>
+        <FormSection
+          title="Rôle"
+          description={
+            readOnly
+              ? undefined
+              : isSelf
+              ? 'Vous ne pouvez pas modifier votre propre rôle.'
+              : canChangeRole
+                ? 'Détermine ce que l’utilisateur peut voir et faire.'
+                : 'Ce rôle ne peut pas être modifié avec vos droits.'
+          }
+        >
           <Controller
-            name="directionId"
+            name="role"
             control={control}
             render={({ field }) => (
-              <Select
-                value={field.value ?? 'none'}
-                onValueChange={(value) =>
-                  field.onChange(value === 'none' ? null : (value ?? null))
-                }
-                disabled={directionsLoading}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Aucune direction" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Aucune direction</SelectItem>
-                  {directions.map((direction) => (
-                    <SelectItem key={direction.id} value={direction.id}>
-                      {direction.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <RoleSelector
+                value={field.value}
+                onChange={field.onChange}
+                roles={canChangeRole ? actorRoles : [user.role]}
+                disabled={isSubmitting || !canChangeRole}
+              />
             )}
           />
-        </div>
-      ) : (
-        <p className="rounded-xl bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-          Cette entreprise n’a pas de direction. Aucun rattachement direction
-          n’est requis.
-        </p>
-      )}
+        </FormSection>
+        </fieldset>
 
-      <div className="space-y-2">
-        <Label>Rôle</Label>
-        <Controller
-          name="role"
-          control={control}
-          render={({ field }) => (
-            <Select
-              value={field.value}
-              onValueChange={(value) =>
-                field.onChange((value as Role | null) ?? user.role)
-              }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Sélectionner un rôle" />
-              </SelectTrigger>
-              <SelectContent>
-                {ROLES.map((role) => (
-                  <SelectItem key={role} value={role}>
-                    {ROLE_LABELS[role]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        />
-      </div>
-
-      <div className="flex justify-end">
-        <Button type="submit" disabled={!isDirty || isSubmitting}>
-          {isSubmitting ? 'Enregistrement…' : (submitLabel ?? 'Enregistrer')}
-        </Button>
-      </div>
-    </form>
+        {readOnly ? null : (
+          <FormActions className="mt-6">
+            <CancelLink href={cancelHref} />
+            <Button type="submit" disabled={!isDirty || isSubmitting}>
+              {isSubmitting ? 'Enregistrement…' : (submitLabel ?? 'Enregistrer les modifications')}
+            </Button>
+          </FormActions>
+        )}
+      </form>
+    </FormCard>
   );
 }

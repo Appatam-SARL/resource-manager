@@ -20,6 +20,7 @@ import { PrismaService } from '../../database/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { PasswordService } from '../auth/services/password.service.js';
+import { RealtimeService } from '../realtime/realtime.service.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { ListUsersQueryDto } from './dto/list-users-query.dto.js';
 import { UpdateUserDto } from './dto/update-user.dto.js';
@@ -47,6 +48,7 @@ export class UsersService {
     private readonly accessScope: AccessScopeService,
     private readonly passwordService: PasswordService,
     private readonly audit: AuditService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   async me(actor: AuthenticatedUser) {
@@ -133,9 +135,14 @@ export class UsersService {
   async update(id: string, dto: UpdateUserDto, actor: AuthenticatedUser) {
     const existing = await this.prisma.user.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Utilisateur introuvable.');
-    this.accessScope.assertCanManageCompany(actor, existing.companyId);
+    this.assertCanManageUser(actor, existing);
 
-    if (dto.role) this.assertCanAssignRole(actor, dto.role);
+    if (dto.role && dto.role !== existing.role) {
+      if (existing.id === actor.id) {
+        throw new ForbiddenException('Vous ne pouvez pas modifier votre propre rôle.');
+      }
+      this.assertCanAssignRole(actor, dto.role);
+    }
 
     const directionId =
       dto.directionId !== undefined ? dto.directionId : existing.directionId;
@@ -174,6 +181,16 @@ export class UsersService {
         directionId: dto.directionId,
       },
     });
+
+    // Realtime rooms depend on role and direction; credentials change ends sessions.
+    const sessionChanged =
+      user.role !== existing.role ||
+      user.directionId !== existing.directionId ||
+      user.email !== existing.email ||
+      passwordHash !== undefined;
+    if (sessionChanged) {
+      this.realtime.disconnectUser(id);
+    }
     return user;
   }
 
@@ -184,7 +201,10 @@ export class UsersService {
   ) {
     const existing = await this.prisma.user.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Utilisateur introuvable.');
-    this.accessScope.assertCanManageCompany(actor, existing.companyId);
+    this.assertCanManageUser(actor, existing);
+    if (existing.id === actor.id && dto.status !== UserStatus.ACTIVE) {
+      throw new ForbiddenException('Vous ne pouvez pas désactiver votre propre compte.');
+    }
 
     const user = await this.prisma.user.update({
       where: { id },
@@ -198,6 +218,9 @@ export class UsersService {
       entityId: id,
       metadata: { status: dto.status },
     });
+    if (dto.status !== UserStatus.ACTIVE) {
+      this.realtime.disconnectUser(id);
+    }
     return user;
   }
 
@@ -257,6 +280,22 @@ export class UsersService {
       user.id !== actor.id
     ) {
       throw new ForbiddenException('Accès refusé à cette direction.');
+    }
+  }
+
+  /**
+   * Company scope, plus: only a Group admin may manage a Group admin account
+   * (otherwise a Company admin could take it over by changing its e-mail or password).
+   */
+  private assertCanManageUser(
+    actor: AuthenticatedUser,
+    target: { companyId: string; role: Role },
+  ) {
+    this.accessScope.assertCanManageCompany(actor, target.companyId);
+    if (target.role === Role.GROUP_ADMIN && actor.role !== Role.GROUP_ADMIN) {
+      throw new ForbiddenException(
+        'Seul un administrateur groupe peut modifier un administrateur groupe.',
+      );
     }
   }
 

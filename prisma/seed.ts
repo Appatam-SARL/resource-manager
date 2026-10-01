@@ -11,11 +11,17 @@ import {
   ReservationStatus,
 } from '@prisma/client';
 import * as argon2 from 'argon2';
+import { existsSync } from 'node:fs';
+import { assertDevOnlyCommand } from './dev-guard';
 
 const prisma = new PrismaClient();
 const DEV_PASSWORD = 'Password123!';
 
 async function main() {
+  // The seed deletes every table first: it must never reach a shared or production database.
+  if (existsSync('.env')) process.loadEnvFile('.env');
+  assertDevOnlyCommand('seed');
+
   console.log('Seeding Resource Manager (development)...');
 
   await prisma.notification.deleteMany();

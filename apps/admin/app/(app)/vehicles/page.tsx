@@ -4,18 +4,16 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { Plus } from 'lucide-react';
 import type { ResourceStatus } from '@resource-manager/types';
+import { ErrorState } from '@/components/shared/error-state';
 import { PageHeader } from '@/components/shared/page-header';
 import { PaginationControls } from '@/components/shared/pagination-controls';
-import { ErrorState } from '@/components/shared/error-state';
-import { buttonVariants } from '@/components/ui/button';
-import {
-  VehiclesFilters,
-  VehiclesTable,
-  useVehicles,
-} from '@/features/vehicles';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { VehiclesFilters, VehiclesTable, useVehicles } from '@/features/vehicles';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { canManageResources } from '@/lib/reservation-permissions';
 import { useAuth } from '@/providers/auth-provider';
-import { cn } from 'cn';
+
+const PAGE_SIZE = 10;
 
 export default function VehiclesPage() {
   const { user } = useAuth();
@@ -23,74 +21,104 @@ export default function VehiclesPage() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<ResourceStatus | ''>('');
   const [companyId, setCompanyId] = useState('');
+  const debouncedSearch = useDebouncedValue(search.trim());
 
   const query = useVehicles({
     page,
-    limit: 10,
-    search: search.trim() || undefined,
+    limit: PAGE_SIZE,
+    search: debouncedSearch || undefined,
     status,
     companyId,
   });
 
   const canManage = user ? canManageResources(user.role) : false;
+  const hasActiveFilters = Boolean(debouncedSearch || status || companyId);
+  const meta = query.data?.meta;
+
+  const resetFilters = () => {
+    setSearch('');
+    setStatus('');
+    setCompanyId('');
+    setPage(1);
+  };
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Véhicules"
-        description="Gérez la flotte de véhicules du Groupe."
+        description="Flotte de véhicules réservables par les collaborateurs de chaque entreprise."
+        meta={
+          meta ? (
+            <span className="tabular-nums">
+              {meta.total} véhicule{meta.total > 1 ? 's' : ''}
+              {hasActiveFilters ? ' correspondant aux filtres' : ''}
+            </span>
+          ) : null
+        }
         actions={
           canManage ? (
-            <Link
-              href="/vehicles/new"
-              className={cn(buttonVariants(), 'gap-1.5')}
-            >
-              <Plus className="size-4" />
+            <Link href="/vehicles/new" className={buttonVariants()}>
+              <Plus className="size-4" aria-hidden />
               Nouveau véhicule
             </Link>
           ) : null
         }
       />
 
-      <VehiclesFilters
-        search={search}
-        status={status}
-        companyId={companyId}
-        onSearchChange={(value) => {
-          setSearch(value);
-          setPage(1);
-        }}
-        onStatusChange={(value) => {
-          setStatus(value);
-          setPage(1);
-        }}
-        onCompanyChange={(value) => {
-          setCompanyId(value);
-          setPage(1);
-        }}
-      />
-
       {query.isError ? (
         <ErrorState
-          onRetry={() => {
-            void query.refetch();
-          }}
+          title="Impossible de charger les véhicules"
+          onRetry={() => void query.refetch()}
+          retrying={query.isFetching}
         />
       ) : (
-        <>
-          <VehiclesTable
-            data={query.data?.data ?? []}
-            isLoading={query.isLoading}
-          />
-          {query.data ? (
-            <PaginationControls
-              page={query.data.meta.page}
-              totalPages={query.data.meta.totalPages}
-              total={query.data.meta.total}
-              onPageChange={setPage}
+        <VehiclesTable
+          data={query.data?.data ?? []}
+          isLoading={query.isLoading}
+          hasActiveFilters={hasActiveFilters}
+          toolbar={
+            <VehiclesFilters
+              search={search}
+              status={status}
+              companyId={companyId}
+              onSearchChange={(value) => {
+                setSearch(value);
+                setPage(1);
+              }}
+              onStatusChange={(value) => {
+                setStatus(value);
+                setPage(1);
+              }}
+              onCompanyChange={(value) => {
+                setCompanyId(value);
+                setPage(1);
+              }}
             />
-          ) : null}
-        </>
+          }
+          emptyAction={
+            hasActiveFilters ? (
+              <Button type="button" variant="outline" onClick={resetFilters}>
+                Effacer les filtres
+              </Button>
+            ) : canManage ? (
+              <Link href="/vehicles/new" className={buttonVariants()}>
+                <Plus className="size-4" aria-hidden />
+                Ajouter un véhicule
+              </Link>
+            ) : undefined
+          }
+          footer={
+            meta && meta.total > 0 ? (
+              <PaginationControls
+                page={meta.page}
+                totalPages={meta.totalPages}
+                total={meta.total}
+                limit={PAGE_SIZE}
+                onPageChange={setPage}
+              />
+            ) : undefined
+          }
+        />
       )}
     </div>
   );

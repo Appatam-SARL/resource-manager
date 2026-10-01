@@ -25,6 +25,7 @@ import {
   setTokens,
 } from '@/lib/auth-storage';
 import { AppError, mapApiError } from '@/lib/errors';
+import type { RegisterPushTokenPayload } from '@/types/notification';
 
 type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean };
 
@@ -89,7 +90,8 @@ function toQuery(params?: ListQueryParams): string {
   return s ? `?${s}` : '';
 }
 
-async function refreshAccessToken(): Promise<string | null> {
+/** Shared by REST and WebSocket: concurrent callers reuse the same refresh request. */
+export async function refreshAccessToken(): Promise<string | null> {
   if (refreshPromise) return refreshPromise;
 
   refreshPromise = (async () => {
@@ -156,9 +158,13 @@ export function getApiClient(): AxiosInstance {
   return client;
 }
 
-async function get<T>(path: string, params?: ListQueryParams): Promise<T> {
+async function get<T>(
+  path: string,
+  params?: ListQueryParams,
+  signal?: AbortSignal,
+): Promise<T> {
   const api = getApiClient();
-  const response = await api.get<T>(`${path}${toQuery(params)}`);
+  const response = await api.get<T>(`${path}${toQuery(params)}`, signal ? { signal } : undefined);
   return response.data;
 }
 
@@ -171,6 +177,12 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 async function patch<T>(path: string, body?: unknown): Promise<T> {
   const api = getApiClient();
   const response = await api.patch<T>(path, body);
+  return response.data;
+}
+
+async function del<T>(path: string, timeout?: number): Promise<T> {
+  const api = getApiClient();
+  const response = await api.delete<T>(path, timeout ? { timeout } : undefined);
   return response.data;
 }
 
@@ -214,33 +226,46 @@ export const roomsApi = {
 };
 
 export const reservationsApi = {
-  list: (params?: ListQueryParams) =>
-    get<Paginated<Reservation>>('/reservations', params),
+  list: (params?: ListQueryParams, signal?: AbortSignal) =>
+    get<Paginated<Reservation>>('/reservations', params, signal),
   get: (id: string) => get<Reservation>(`/reservations/${id}`),
   create: (body: unknown) => post<Reservation>('/reservations', body),
   cancel: (id: string) => post<Reservation>(`/reservations/${id}/cancel`),
-  checkAvailability: (params: {
-    resourceType: string;
-    resourceId: string;
-    startAt: string;
-    endAt: string;
-  }) =>
+  extend: (id: string, newEndAt: string) =>
+    post<Reservation>(`/reservations/${id}/extend`, { newEndAt }),
+  checkAvailability: (
+    params: {
+      resourceType: string;
+      resourceId: string;
+      startAt: string;
+      endAt: string;
+    },
+    signal?: AbortSignal,
+  ) =>
     get<{
       available: boolean;
       conflicts: { id: string; status: string; startAt: string; endAt: string }[];
-    }>('/reservations/availability', params),
+    }>('/reservations/availability', params, signal),
 };
 
 export const calendarApi = {
-  list: (params: ListQueryParams) =>
-    get<CalendarEvent[]>('/calendar', params),
+  list: (params: ListQueryParams, signal?: AbortSignal) =>
+    get<CalendarEvent[]>('/calendar', params, signal),
 };
 
 export const notificationsApi = {
   list: (params?: ListQueryParams) =>
     get<Paginated<Notification>>('/notifications', params),
+  unreadCount: () => get<{ count: number }>('/notifications/unread-count'),
   markRead: (id: string) => patch<Notification>(`/notifications/${id}/read`),
-  markAllRead: () => patch<{ count?: number }>('/notifications/read-all'),
+  markAllRead: () => patch<{ updated: number }>('/notifications/read-all'),
+  registerPushToken: (body: RegisterPushTokenPayload) =>
+    post<{ id: string; isActive: boolean }>('/notifications/push-tokens', body),
+  unregisterPushToken: (token: string, timeout?: number) =>
+    del<{ deactivated: number }>(
+      `/notifications/push-tokens/${encodeURIComponent(token)}`,
+      timeout,
+    ),
 };
 
 export function assertAppError(error: unknown): asserts error is AppError {

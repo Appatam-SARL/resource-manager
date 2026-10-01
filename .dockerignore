@@ -1,0 +1,36 @@
+# Dependencies and build outputs are rebuilt inside the image
+**/node_modules
+**/.next
+**/dist
+**/build
+**/out
+**/.turbo
+**/.expo
+**/.vercel
+**/coverage
+**/*.tsbuildinfo
+**/*.log
+
+# Secrets must never reach the build context
+**/.env
+**/.env.*
+!**/.env.example
+**/*.pem
+**/*.key
+**/google-services.json
+**/GoogleService-Info.plist
+
+# npm lockfiles conflict with the pnpm workspace lockfile
+**/package-lock.json
+
+# Not needed by the api/admin images
+.git
+.github
+.cursor
+.vscode
+.idea
+apps/mobile
+apps/web
+docs
+infrastructure
+**/.DS_Store

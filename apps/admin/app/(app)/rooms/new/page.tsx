@@ -1,8 +1,8 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { PageHeader } from '@/components/shared/page-header';
 import { ErrorState } from '@/components/shared/error-state';
+import { PageHeader } from '@/components/shared/page-header';
 import { RoomForm, useCreateRoom } from '@/features/rooms';
 import { canManageResources } from '@/lib/reservation-permissions';
 import { useAuth } from '@/providers/auth-provider';
@@ -22,14 +22,16 @@ export default function NewRoomPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       <PageHeader
+        back={{ href: '/rooms', label: 'Salles' }}
         title="Nouvelle salle"
-        description="Ajoutez une salle de réunion à une entreprise."
+        description="La salle sera immédiatement réservable par les collaborateurs de son entreprise."
       />
       <RoomForm
         loading={createMutation.isPending}
         submitLabel="Créer la salle"
+        cancelHref="/rooms"
         onSubmit={async (values) => {
           const created = await createMutation.mutateAsync(values);
           router.push(`/rooms/${created.id}`);

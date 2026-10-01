@@ -1,0 +1,24 @@
+# Shared security headers, imported by every environment's Caddyfile.
+
+(security_headers) {
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		-Server
+		-X-Powered-By
+	}
+}
+
+# Next.js App Router injects inline bootstrap scripts and styles, hence 'unsafe-inline'.
+# connect-src stays same-origin: the admin reaches the API through /api on its own domain.
+(admin_csp) {
+	header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+}
+
+# Production only: enforce HTTPS for one year once the domain is confirmed to serve HTTPS.
+(hsts) {
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+}

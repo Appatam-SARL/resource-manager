@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/Button';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { FadeIn } from '@/components/motion';
 import { colors, radius, spacing } from '@/constants/theme';
-import { MotiView } from 'moti';
+import Animated, { FadeInUp, ReduceMotion } from 'react-native-reanimated';
 
 export default function LoginScreen() {
   const { login, isAuthenticated, isLoading: authLoading } = useAuth();
@@ -57,10 +57,8 @@ export default function LoginScreen() {
 
   return (
     <Screen scroll keyboard padded={false} animated={false}>
-      <MotiView
-        from={{ opacity: 0, translateY: -16 }}
-        animate={{ opacity: 1, translateY: 0 }}
-        transition={{ type: 'timing', duration: 400 }}
+      <Animated.View
+        entering={FadeInUp.duration(400).reduceMotion(ReduceMotion.System)}
         style={styles.hero}
       >
         <Text style={styles.brand}>Resource Manager</Text>
@@ -68,7 +66,7 @@ export default function LoginScreen() {
         <Text style={styles.subtitle}>
           Connectez-vous pour gérer vos réservations de véhicules et de salles.
         </Text>
-      </MotiView>
+      </Animated.View>
 
       <FadeIn delay={120}>
       <View style={styles.formCard}>

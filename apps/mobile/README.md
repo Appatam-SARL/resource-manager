@@ -92,6 +92,34 @@ Profils définis dans `eas.json` : `development`, `preview`, `production`.
 npx eas-cli@latest build --profile development --platform android
 ```
 
+## Notifications push
+
+Flux : réservation (API) → notification persistée en base → envoi Expo Push →
+notification système → tap → écran de la réservation. La base reste la source
+de vérité : l’écran Notifications fonctionne même si le push échoue.
+
+**Expo Go ne permet pas de tester le push** (supprimé sur Android depuis le
+SDK 53). Dans Expo Go, le module push n’est pas chargé ; la liste, le badge et
+la lecture des notifications restent fonctionnels via l’API.
+
+Mise en place (une seule fois) :
+
+```bash
+npx eas-cli@latest login
+npx eas-cli@latest init                  # ajoute extra.eas.projectId dans app.json
+npx expo install expo-dev-client         # requis par le profil "development"
+npx eas-cli@latest credentials           # Android : clé FCM V1 (google-services.json)
+npx eas-cli@latest build --profile development --platform android
+```
+
+Puis `pnpm --filter mobile start` et ouvrir le build de développement installé.
+
+- Canaux Android : `reservation` (importance haute) et `general`.
+- Le jeton Expo est envoyé à `POST /api/v1/notifications/push-tokens` et
+  désactivé à la déconnexion (`DELETE /api/v1/notifications/push-tokens/:token`).
+- Côté API, `EXPO_ACCESS_TOKEN` n’est requis que si « Enhanced Push Security »
+  est activé sur le compte Expo.
+
 ## Notes métier
 
 - La direction est optionnelle : elle n’est affichée que si elle est renseignée.

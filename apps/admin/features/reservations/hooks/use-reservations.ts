@@ -14,6 +14,10 @@ export type ReservationFilters = {
   page?: number;
   limit?: number;
   companyId?: string;
+  directionId?: string;
+  vehicleId?: string;
+  roomId?: string;
+  userId?: string;
   status?: ReservationStatus | '';
   resourceType?: ResourceType | '';
 };
@@ -23,6 +27,10 @@ export function useReservations(filters: ReservationFilters) {
     page: filters.page ?? 1,
     limit: filters.limit ?? 10,
     companyId: filters.companyId || undefined,
+    directionId: filters.directionId || undefined,
+    vehicleId: filters.vehicleId || undefined,
+    roomId: filters.roomId || undefined,
+    userId: filters.userId || undefined,
     status: filters.status || undefined,
     resourceType: filters.resourceType || undefined,
   };
@@ -81,13 +89,13 @@ export function useRejectReservation() {
       void queryClient.invalidateQueries({ queryKey: ['reservations'] });
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       void queryClient.invalidateQueries({ queryKey: ['calendar'] });
-      toast.success('Réservation rejetée');
+      toast.success('Réservation refusée');
     },
     onError: (error: unknown) => {
       toast.error(
         error instanceof ApiError
           ? error.message
-          : 'Impossible de rejeter la réservation',
+          : 'Impossible de refuser la réservation',
       );
     },
   });

@@ -1,16 +1,18 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import frLocale from '@fullcalendar/core/locales/fr';
-import type { DatesSetArg, EventClickArg } from '@fullcalendar/core';
+import type { DatesSetArg, EventClickArg, EventContentArg, EventInput } from '@fullcalendar/core';
 import { formatISO } from 'date-fns';
-import type { ResourceType } from '@resource-manager/types';
-import { Label } from '@/components/ui/label';
+import { ChevronLeft, ChevronRight, RotateCw } from 'lucide-react';
+import type { ReservationStatus, ResourceType } from '@resource-manager/types';
+import { FilterChips, type FilterChipOption } from '@/components/shared/data-toolbar';
+import { Button } from '@/components/ui/button';
 import {
   Select,
   SelectContent,
@@ -18,59 +20,82 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { LoadingState } from '@/components/shared/loading-state';
-import { ErrorState } from '@/components/shared/error-state';
+import { selectItems } from '@/lib/select-items';
 import { useCalendar } from '@/features/calendar/hooks/use-calendar';
 import { useCompaniesOptions } from '@/hooks/use-companies-options';
-import { RESOURCE_TYPE_LABELS } from '@/lib/format';
+import { getStatusConfig, STATUS_TONE_CLASSES } from '@/lib/status';
 import { useAuth } from '@/providers/auth-provider';
+import { cn } from 'cn';
+
+type CalendarViewType = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay';
+
+const VIEW_OPTIONS: FilterChipOption<CalendarViewType>[] = [
+  { value: 'dayGridMonth', label: 'Mois' },
+  { value: 'timeGridWeek', label: 'Semaine' },
+  { value: 'timeGridDay', label: 'Jour' },
+];
+
+const TYPE_OPTIONS: FilterChipOption<ResourceType | 'ALL'>[] = [
+  { value: 'ALL', label: 'Tout' },
+  { value: 'VEHICLE', label: 'Véhicules' },
+  { value: 'ROOM', label: 'Salles' },
+];
+
+/** Statuses returned by GET /calendar (cancelled / rejected reservations no longer block a slot). */
+const LEGEND_STATUSES: ReservationStatus[] = ['PENDING', 'APPROVED', 'COMPLETED'];
 
 function toDateParam(date: Date): string {
   return formatISO(date, { representation: 'date' });
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  PENDING: '#d97706',
-  APPROVED: '#2d6a4f',
-  REJECTED: '#dc2626',
-  CANCELLED: '#6b7280',
-  COMPLETED: '#40916c',
-};
+function initialCalendarView(): CalendarViewType {
+  if (typeof window === 'undefined') return 'dayGridMonth';
+  return window.matchMedia('(max-width: 767px)').matches ? 'timeGridDay' : 'dayGridMonth';
+}
+
+type EventMeta = { resourceName?: string; requesterName?: string };
+
+function renderEventContent(arg: EventContentArg) {
+  const meta = arg.event.extendedProps as EventMeta;
+  const label = meta.resourceName ?? arg.event.title;
+  return (
+    <div className="flex min-w-0 flex-col overflow-hidden leading-tight">
+      <span className="truncate text-[12px] font-medium">
+        {arg.timeText ? <span className="mr-1 text-muted-foreground tabular-nums">{arg.timeText}</span> : null}
+        {label}
+      </span>
+      {meta.requesterName && arg.view.type !== 'dayGridMonth' ? (
+        <span className="truncate text-[11px] text-muted-foreground">{meta.requesterName}</span>
+      ) : null}
+    </div>
+  );
+}
 
 export function CalendarView() {
   const router = useRouter();
+  const calendarRef = useRef<FullCalendar>(null);
   const { user } = useAuth();
   const isGroupAdmin = user?.role === 'GROUP_ADMIN';
   const companiesQuery = useCompaniesOptions(isGroupAdmin);
 
   const [companyId, setCompanyId] = useState('');
   const [resourceType, setResourceType] = useState<ResourceType | ''>('');
-  const [range, setRange] = useState(() => {
-    const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    return {
-      startDate: toDateParam(start),
-      endDate: toDateParam(end),
-    };
-  });
+  const [initialView] = useState(initialCalendarView);
+  const [view, setView] = useState<CalendarViewType>(initialView);
+  const [title, setTitle] = useState('');
+  const [range, setRange] = useState({ startDate: '', endDate: '' });
 
-  const query = useCalendar({
-    startDate: range.startDate,
-    endDate: range.endDate,
-    companyId,
-    resourceType,
-  });
+  const query = useCalendar({ ...range, companyId, resourceType });
 
-  const events = useMemo(
+  const events = useMemo<EventInput[]>(
     () =>
       (query.data ?? []).map((event) => ({
         id: event.id,
         title: event.title,
         start: event.start,
         end: event.end,
-        backgroundColor: STATUS_COLORS[event.status] ?? '#1b4332',
-        borderColor: STATUS_COLORS[event.status] ?? '#1b4332',
+        classNames: [`rm-event--${event.status.toLowerCase()}`],
+        extendedProps: { resourceName: event.resourceName, requesterName: event.requesterName },
       })),
     [query.data],
   );
@@ -78,55 +103,55 @@ export function CalendarView() {
   const handleDatesSet = (arg: DatesSetArg) => {
     const startDate = toDateParam(arg.start);
     const endDate = toDateParam(arg.end);
+    setTitle(arg.view.title);
+    setView(arg.view.type as CalendarViewType);
     setRange((prev) =>
-      prev.startDate === startDate && prev.endDate === endDate
-        ? prev
-        : { startDate, endDate },
+      prev.startDate === startDate && prev.endDate === endDate ? prev : { startDate, endDate },
     );
   };
 
   const handleEventClick = (info: EventClickArg) => {
+    info.jsEvent.preventDefault();
     router.push(`/reservations/${info.event.id}`);
   };
 
+  const api = () => calendarRef.current?.getApi();
+  const isEmpty = query.isSuccess && events.length === 0;
+
   return (
-    <div className="space-y-4">
-      <div className="grid gap-3 rounded-3xl bg-card p-4 ring-1 ring-border/60 sm:grid-cols-2 lg:grid-cols-3">
-        <div className="space-y-1.5">
-          <Label>Type de ressource</Label>
-          <Select
-            value={resourceType || 'ALL'}
-            onValueChange={(value) =>
-              setResourceType(
-                !value || value === 'ALL' ? '' : (value as ResourceType),
-              )
-            }
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Tous les types" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">Tous les types</SelectItem>
-              {(Object.keys(RESOURCE_TYPE_LABELS) as ResourceType[]).map(
-                (key) => (
-                  <SelectItem key={key} value={key}>
-                    {RESOURCE_TYPE_LABELS[key]}
-                  </SelectItem>
-                ),
-              )}
-            </SelectContent>
-          </Select>
+    <div className="surface overflow-hidden">
+      <div className="flex flex-col gap-3 border-b border-border p-3 md:p-4 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center">
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="Période précédente" onClick={() => api()?.prev()}>
+              <ChevronLeft className="size-4" />
+            </Button>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="Période suivante" onClick={() => api()?.next()}>
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={() => api()?.today()}>
+            Aujourd’hui
+          </Button>
+          <h2 className="ml-1 truncate text-base font-semibold text-foreground first-letter:uppercase" aria-live="polite">
+            {title}
+          </h2>
         </div>
-        {isGroupAdmin ? (
-          <div className="space-y-1.5">
-            <Label>Entreprise</Label>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <FilterChips
+            label="Type de ressource"
+            options={TYPE_OPTIONS}
+            value={resourceType || 'ALL'}
+            onChange={(next) => setResourceType(next === 'ALL' ? '' : next)}
+          />
+          {isGroupAdmin ? (
             <Select
               value={companyId || 'ALL'}
-              onValueChange={(value) =>
-                setCompanyId(!value || value === 'ALL' ? '' : value)
-              }
+              onValueChange={(next) => setCompanyId(!next || next === 'ALL' ? '' : next)}
+              items={selectItems(companiesQuery.data ?? [], { ALL: 'Toutes les entreprises' })}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="h-9 w-full sm:w-52" aria-label="Entreprise">
                 <SelectValue placeholder="Toutes les entreprises" />
               </SelectTrigger>
               <SelectContent>
@@ -138,66 +163,69 @@ export function CalendarView() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-        ) : null}
+          ) : null}
+          <FilterChips
+            label="Vue du calendrier"
+            options={VIEW_OPTIONS}
+            value={view}
+            onChange={(next) => api()?.changeView(next)}
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2.5 text-xs text-muted-foreground">
+        <ul className="flex flex-wrap items-center gap-x-4 gap-y-1" aria-label="Légende">
+          {LEGEND_STATUSES.map((status) => {
+            const config = getStatusConfig(status);
+            return (
+              <li key={status} className="flex items-center gap-1.5">
+                <span className={cn('size-2 rounded-full', STATUS_TONE_CLASSES[config.tone].dot)} aria-hidden />
+                {config.label}
+              </li>
+            );
+          })}
+        </ul>
+        <span aria-live="polite">
+          {query.isFetching
+            ? 'Actualisation…'
+            : isEmpty
+              ? 'Aucune réservation sur cette période'
+              : query.isSuccess
+                ? `${events.length} réservation${events.length > 1 ? 's' : ''} sur la période`
+                : null}
+        </span>
       </div>
 
       {query.isError ? (
-        <ErrorState
-          onRetry={() => {
-            void query.refetch();
-          }}
-        />
-      ) : (
-        <div className="relative overflow-hidden rounded-3xl bg-card p-4 ring-1 ring-border/60">
-          {query.isFetching ? (
-            <div className="pointer-events-none absolute inset-x-4 top-4 z-10">
-              <LoadingState rows={1} label="Actualisation du calendrier…" />
-            </div>
-          ) : null}
-          <style>{`
-            .fc {
-              --fc-border-color: #e5e7eb;
-              --fc-button-bg-color: #1b4332;
-              --fc-button-border-color: #1b4332;
-              --fc-button-hover-bg-color: #16362a;
-              --fc-button-hover-border-color: #16362a;
-              --fc-button-active-bg-color: #11291f;
-              --fc-button-active-border-color: #11291f;
-              --fc-today-bg-color: #e8f0ec;
-              font-family: inherit;
-            }
-            .fc .fc-toolbar-title {
-              font-size: 1.125rem;
-              font-weight: 600;
-            }
-            .fc .fc-button {
-              border-radius: 0.75rem;
-              text-transform: capitalize;
-              box-shadow: none !important;
-            }
-            .fc .fc-daygrid-event,
-            .fc .fc-timegrid-event {
-              border-radius: 0.5rem;
-              padding: 1px 4px;
-            }
-          `}</style>
-          <FullCalendar
-            plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-            initialView="dayGridMonth"
-            headerToolbar={{
-              left: 'prev,next today',
-              center: 'title',
-              right: 'dayGridMonth,timeGridWeek,timeGridDay',
-            }}
-            locale={frLocale}
-            height="auto"
-            events={events}
-            datesSet={handleDatesSet}
-            eventClick={handleEventClick}
-          />
+        <div role="alert" className="mx-4 mb-3 flex items-center justify-between gap-3 rounded-lg bg-destructive/[0.05] px-3 py-2 text-sm ring-1 ring-destructive/15">
+          <span className="text-foreground">Impossible de charger les réservations de cette période.</span>
+          <Button type="button" variant="outline" size="sm" onClick={() => void query.refetch()}>
+            <RotateCw className="size-3.5" aria-hidden />
+            Réessayer
+          </Button>
         </div>
-      )}
+      ) : null}
+
+      <div className={cn('rm-calendar relative transition-opacity', query.isFetching && 'opacity-70')}>
+        <FullCalendar
+          ref={calendarRef}
+          plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+          initialView={initialView}
+          headerToolbar={false}
+          locale={frLocale}
+          height="auto"
+          dayMaxEvents={3}
+          eventDisplay="block"
+          nowIndicator
+          scrollTime="07:00:00"
+          allDaySlot={false}
+          eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
+          events={events}
+          eventContent={renderEventContent}
+          datesSet={handleDatesSet}
+          eventClick={handleEventClick}
+        />
+      </div>
     </div>
   );
 }

@@ -12,6 +12,11 @@ out/
 .env
 .env.*
 !.env.example
+!.env.*.example
+*.pem
+*.key
+google-services.json
+GoogleService-Info.plist
 
 # Logs
 *.log
@@ -38,3 +43,5 @@ prisma/*.db-journal
 *.tsbuildinfo
 .temp/
 .tmp/
+.vercel
+.env*

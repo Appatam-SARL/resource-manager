@@ -28,6 +28,41 @@ function makeUser(
 describe('AccessScopeService', () => {
   const service = new AccessScopeService();
 
+  describe('canViewReservation', () => {
+    const techReservation = { companyId: 'company-a', directionId: 'dir-tech', userId: 'employee-1' };
+
+    it('GROUP_ADMIN sees every reservation of the Group', () => {
+      const admin = makeUser({ role: Role.GROUP_ADMIN, companyId: 'company-z' });
+      expect(service.canViewReservation(admin, techReservation)).toBe(true);
+    });
+
+    it('COMPANY_ADMIN sees only its company', () => {
+      expect(service.canViewReservation(makeUser({ role: Role.COMPANY_ADMIN, companyId: 'company-a' }), techReservation)).toBe(true);
+      expect(service.canViewReservation(makeUser({ role: Role.COMPANY_ADMIN, companyId: 'company-b' }), techReservation)).toBe(false);
+    });
+
+    it('MANAGER of a direction sees its direction and its own reservations only', () => {
+      const managerTech = makeUser({ id: 'm-tech', role: Role.MANAGER, companyId: 'company-a', directionId: 'dir-tech' });
+      const managerCom = makeUser({ id: 'm-com', role: Role.MANAGER, companyId: 'company-a', directionId: 'dir-com' });
+
+      expect(service.canViewReservation(managerTech, techReservation)).toBe(true);
+      expect(service.canViewReservation(managerCom, techReservation)).toBe(false);
+      expect(service.canViewReservation(managerCom, { ...techReservation, userId: 'm-com' })).toBe(true);
+    });
+
+    it('MANAGER without direction covers its whole company (company without directions)', () => {
+      const manager = makeUser({ role: Role.MANAGER, companyId: 'company-c' });
+      expect(service.canViewReservation(manager, { companyId: 'company-c', directionId: null, userId: 'x' })).toBe(true);
+      expect(service.canViewReservation(manager, techReservation)).toBe(false);
+    });
+
+    it('EMPLOYEE sees only its own reservations, with or without direction', () => {
+      const employee = makeUser({ id: 'employee-1', role: Role.EMPLOYEE, companyId: 'company-a' });
+      expect(service.canViewReservation(employee, techReservation)).toBe(true);
+      expect(service.canViewReservation(employee, { ...techReservation, userId: 'employee-2' })).toBe(false);
+    });
+  });
+
   describe('companyWhere', () => {
     it('GROUP_ADMIN without filter sees all companies', () => {
       const admin = makeUser({

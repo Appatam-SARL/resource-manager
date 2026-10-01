@@ -1,0 +1,96 @@
+# Production rollback on cPanel: switches the API and the admin back to an installed release.
+# Database migrations are NOT reverted (see docs/devops/production.md before using it after a
+# release that contained a migration).
+
+name: Rollback PRODUCTION
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: SHA complet de la release à restaurer (vide = release précédente)
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: Rollback PRODUCTION (cPanel)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_ADMIN_URL }}
+    env:
+      TARGET_SHA: ${{ inputs.commit_sha }}
+      SSH_PORT: ${{ vars.CPANEL_SSH_PORT || '22' }}
+      DEPLOY_ROOT: ${{ vars.CPANEL_DEPLOY_ROOT }}
+    steps:
+      - name: Validate commit SHA format
+        run: |
+          if [ -n "$TARGET_SHA" ] && ! [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::commit_sha doit être vide ou un SHA complet de 40 caractères"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: infrastructure/scripts
+
+      - name: Configure SSH (pinned host key)
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.CPANEL_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.CPANEL_SSH_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_deploy ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host deploy-target
+            HostName ${{ vars.CPANEL_HOST }}
+            User ${{ vars.CPANEL_USER }}
+            Port ${SSH_PORT}
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          EOF
+
+      - name: Switch release
+        id: switch
+        run: |
+          # shellcheck disable=SC2029 # expanded on the runner on purpose
+          output="$(ssh deploy-target \
+            "DEPLOY_ROOT='${DEPLOY_ROOT}' \
+             API_APP_ROOT='${{ vars.CPANEL_API_APP_ROOT }}' \
+             ADMIN_APP_ROOT='${{ vars.CPANEL_ADMIN_APP_ROOT }}' \
+             bash '${DEPLOY_ROOT}/bin/rollback-release.sh' ${TARGET_SHA} && \
+             basename \"\$(readlink '${DEPLOY_ROOT}/api/current')\"")"
+          echo "$output" | head -n -1
+          echo "live_sha=$(echo "$output" | tail -n 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the API
+        env:
+          CHECK_URL: ${{ vars.PRODUCTION_API_URL }}/api/v1/health
+          EXPECTED_COMMIT: ${{ steps.switch.outputs.live_sha }}
+          REQUIRE_TEXT: '"status":"ok"'
+          TIMEOUT_SECONDS: '300'
+        run: bash infrastructure/scripts/wait-for-release.sh
+
+      - name: Wait for the admin
+        env:
+          CHECK_URL: ${{ vars.PRODUCTION_ADMIN_URL }}/login
+          EXPECTED_COMMIT: ${{ steps.switch.outputs.live_sha }}
+          TIMEOUT_SECONDS: '300'
+        run: bash infrastructure/scripts/wait-for-release.sh
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/id_deploy

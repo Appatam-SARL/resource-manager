@@ -12,8 +12,8 @@ export default function ReservationsLayout() {
       }}
     >
       <Stack.Screen name="index" options={{ title: 'Réservations', headerShown: false }} />
-      <Stack.Screen name="new" options={{ title: 'Nouvelle réservation', presentation: 'modal' }} />
-      <Stack.Screen name="[id]" options={{ title: 'Détail' }} />
+      <Stack.Screen name="new" options={{ title: 'Nouvelle réservation', headerShown: false }} />
+      <Stack.Screen name="[id]" options={{ title: 'Réservation', headerShown: false }} />
     </Stack>
   );
 }

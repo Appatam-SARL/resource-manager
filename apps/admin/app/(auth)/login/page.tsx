@@ -77,7 +77,7 @@ function LoginForm() {
         animate={{ scale: 1 }}
         transition={{ type: 'spring', stiffness: 260, damping: 22 }}
       >
-    <Card className="w-full rounded-3xl border-0 shadow-sm ring-1 ring-border/60 [--card-spacing:--spacing(6)]">
+    <Card className="w-full [--card-spacing:--spacing(6)]">
       <CardHeader className="items-center text-center">
         <motion.div
           className="mb-3 flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm"
@@ -175,7 +175,7 @@ export default function LoginPage() {
   return (
     <Suspense
       fallback={
-        <Card className="w-full max-w-md rounded-3xl border-0 shadow-sm ring-1 ring-border/60">
+        <Card className="w-full max-w-md">
           <CardContent className="flex items-center justify-center py-16 text-sm text-muted-foreground">
             Chargement…
           </CardContent>

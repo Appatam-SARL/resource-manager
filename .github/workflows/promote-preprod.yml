@@ -1,0 +1,179 @@
+# Promotion STAGING → PREPROD (manual).
+#
+# Promotes a commit already validated in STAGING, without rebuilding the API image:
+#   1. checks: commit from dev, images built by CI, commit currently live in STAGING
+#   2. tags the existing images as "preprod" (same digest)
+#   3. API → Render (image <sha>), admin → Vercel (built from the same commit)
+#
+# Required GitHub configuration (see docs/devops/preprod.md):
+#   Repository variables  STAGING_API_URL, PREPROD_API_URL, PREPROD_ADMIN_URL
+#   Environment "preprod" secrets  RENDER_API_DEPLOY_HOOK, VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
+
+name: Promote PREPROD
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: SHA complet (40 caractères) du commit validé en STAGING
+        required: true
+        type: string
+      skip_staging_check:
+        description: Ne pas exiger que ce commit soit celui actuellement en STAGING
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-preprod
+  cancel-in-progress: false
+
+env:
+  COMMIT_SHA: ${{ inputs.commit_sha }}
+
+jobs:
+  verify:
+    name: Vérifications avant promotion
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      api_image: ${{ steps.meta.outputs.api_image }}
+      admin_image: ${{ steps.meta.outputs.admin_image }}
+      admin_version: ${{ steps.meta.outputs.admin_version }}
+    steps:
+      - name: Validate commit SHA format
+        run: |
+          if ! [[ "$COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::commit_sha doit être un SHA complet de 40 caractères hexadécimaux"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Commit must belong to dev
+        run: |
+          git fetch --quiet origin dev
+          if ! git merge-base --is-ancestor "$COMMIT_SHA" origin/dev; then
+            echo "::error::Le commit ${COMMIT_SHA::7} n'appartient pas à la branche dev"
+            exit 1
+          fi
+
+      - name: Resolve image names
+        id: meta
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          git checkout --quiet "$COMMIT_SHA"
+          {
+            echo "api_image=ghcr.io/${owner}/resource-manager-api"
+            echo "admin_image=ghcr.io/${owner}/resource-manager-admin"
+            echo "admin_version=$(node -p "require('./apps/admin/package.json').version")"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Images must exist (built only when CI passed)
+        run: |
+          docker buildx imagetools inspect "${{ steps.meta.outputs.api_image }}:${COMMIT_SHA}" > /dev/null
+          docker buildx imagetools inspect "${{ steps.meta.outputs.admin_image }}:${COMMIT_SHA}" > /dev/null
+
+      - name: Commit must be live in STAGING
+        if: ${{ !inputs.skip_staging_check }}
+        env:
+          STAGING_API_URL: ${{ vars.STAGING_API_URL }}
+        run: |
+          health="$(curl -sS --max-time 15 "${STAGING_API_URL}/api/v1/health")"
+          if ! printf '%s' "$health" | grep -qF "\"commit\":\"${COMMIT_SHA}\""; then
+            echo "::error::STAGING ne tourne pas sur ${COMMIT_SHA::7} : promotion refusée"
+            exit 1
+          fi
+
+  promote-images:
+    name: Tag preprod (même image, sans rebuild)
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add the preprod tag to the existing digests
+        run: |
+          for image in "${{ needs.verify.outputs.api_image }}" "${{ needs.verify.outputs.admin_image }}"; do
+            docker buildx imagetools create --tag "${image}:preprod" "${image}:${COMMIT_SHA}"
+          done
+
+  deploy:
+    name: Déploiement PREPROD
+    needs: [verify, promote-images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: preprod
+      url: ${{ vars.PREPROD_ADMIN_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Deploy API on Render (image ${{ inputs.commit_sha }})
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_API_DEPLOY_HOOK }}
+          IMAGE: ${{ needs.verify.outputs.api_image }}:${{ inputs.commit_sha }}
+          CHECK_URL: ${{ vars.PREPROD_API_URL }}/api/v1/health
+          EXPECTED_COMMIT: ${{ inputs.commit_sha }}
+          REQUIRE_TEXT: '"status":"ok"'
+        run: bash infrastructure/scripts/render-deploy.sh
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Deploy admin on Vercel (built from the same commit)
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          ADMIN_VERSION: ${{ needs.verify.outputs.admin_version }}
+        run: |
+          pnpm dlx vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
+          pnpm dlx vercel@latest build --prod --token="$VERCEL_TOKEN"
+          pnpm dlx vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN" \
+            --env GIT_COMMIT_SHA="$COMMIT_SHA" --env APP_VERSION="$ADMIN_VERSION" > /dev/null
+
+      - name: Wait for the admin release
+        env:
+          CHECK_URL: ${{ vars.PREPROD_ADMIN_URL }}/login
+          EXPECTED_COMMIT: ${{ inputs.commit_sha }}
+        run: bash infrastructure/scripts/wait-for-release.sh
+
+      - name: Summary
+        run: |
+          {
+            echo "### PREPROD déployé"
+            echo "- Commit : \`${COMMIT_SHA::7}\`"
+            echo "- API (Render) : ${{ needs.verify.outputs.api_image }}:${COMMIT_SHA}"
+            echo "- Admin (Vercel) : construit depuis ${COMMIT_SHA::7}"
+          } >> "$GITHUB_STEP_SUMMARY"

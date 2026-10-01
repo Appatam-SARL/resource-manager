@@ -1,59 +1,51 @@
-import { Badge, badgeVariants } from '@/components/ui/badge';
-import type { VariantProps } from 'class-variance-authority';
+import type { LucideIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { cn } from 'cn';
+import { getStatusConfig, STATUS_TONE_CLASSES, type StatusTone } from '@/lib/status';
 
-type BadgeVariant = NonNullable<VariantProps<typeof badgeVariants>['variant']>;
-
-const STATUS_STYLES: Record<
-  string,
-  { label: string; variant: BadgeVariant; className?: string }
-> = {
-  ACTIVE: { label: 'Actif', variant: 'secondary', className: 'bg-success/15 text-success' },
-  INACTIVE: { label: 'Inactif', variant: 'outline' },
-  AVAILABLE: {
-    label: 'Disponible',
-    variant: 'secondary',
-    className: 'bg-success/15 text-success',
-  },
-  MAINTENANCE: {
-    label: 'Maintenance',
-    variant: 'secondary',
-    className: 'bg-warning/15 text-warning',
-  },
-  OUT_OF_SERVICE: { label: 'Hors service', variant: 'destructive' },
-  PENDING: {
-    label: 'En attente',
-    variant: 'secondary',
-    className: 'bg-warning/15 text-warning',
-  },
-  APPROVED: {
-    label: 'Approuvée',
-    variant: 'secondary',
-    className: 'bg-success/15 text-success',
-  },
-  REJECTED: { label: 'Rejetée', variant: 'destructive' },
-  CANCELLED: { label: 'Annulée', variant: 'outline' },
-  COMPLETED: { label: 'Terminée', variant: 'secondary' },
+type ToneBadgeProps = {
+  tone: StatusTone;
+  children: ReactNode;
+  /** Replaces the tone dot. */
+  icon?: LucideIcon;
+  className?: string;
 };
+
+/** Base badge for any toned label (statuses, audit actions…); colours come from `STATUS_TONE_CLASSES` only. */
+export function ToneBadge({ tone, children, icon: Icon, className }: ToneBadgeProps) {
+  const classes = STATUS_TONE_CLASSES[tone];
+  return (
+    <span
+      data-slot="status-badge"
+      className={cn(
+        'inline-flex h-[22px] w-fit shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium whitespace-nowrap ring-1 ring-inset',
+        classes.badge,
+        className,
+      )}
+    >
+      {Icon ? (
+        <Icon className="size-3.5" aria-hidden />
+      ) : (
+        <span className={cn('size-1.5 rounded-full', classes.dot)} aria-hidden />
+      )}
+      {children}
+    </span>
+  );
+}
 
 type StatusBadgeProps = {
   status: string;
   label?: string;
+  /** "dot" is the compact default used in tables; "icon" is more explicit for detail pages. */
+  variant?: 'dot' | 'icon';
   className?: string;
 };
 
-export function StatusBadge({ status, label, className }: StatusBadgeProps) {
-  const config = STATUS_STYLES[status] ?? {
-    label: status,
-    variant: 'outline' as const,
-  };
-
+export function StatusBadge({ status, label, variant = 'dot', className }: StatusBadgeProps) {
+  const config = getStatusConfig(status);
   return (
-    <Badge
-      variant={config.variant}
-      className={cn(config.className, className)}
-    >
+    <ToneBadge tone={config.tone} icon={variant === 'icon' ? config.icon : undefined} className={className}>
       {label ?? config.label}
-    </Badge>
+    </ToneBadge>
   );
 }

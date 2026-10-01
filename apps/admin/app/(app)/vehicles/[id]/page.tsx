@@ -1,26 +1,20 @@
 'use client';
 
 import { use } from 'react';
-import type { ResourceStatus } from '@resource-manager/types';
-import { PageHeader } from '@/components/shared/page-header';
-import { StatusBadge } from '@/components/shared/status-badge';
-import { ErrorState } from '@/components/shared/error-state';
+import { Building2 } from 'lucide-react';
+import { DetailErrorState } from '@/components/shared/detail-error-state';
 import { LoadingState } from '@/components/shared/loading-state';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { PageHeader } from '@/components/shared/page-header';
+import { Panel } from '@/components/shared/panel';
+import { ResourceStatusPanel } from '@/components/shared/resource-status-panel';
+import { StatusBadge } from '@/components/shared/status-badge';
+import { ResourceReservationsPanel } from '@/features/reservations';
 import {
   VehicleForm,
-  useVehicle,
   useUpdateVehicle,
   useUpdateVehicleStatus,
+  useVehicle,
 } from '@/features/vehicles';
-import { RESOURCE_STATUS_LABELS } from '@/lib/format';
 import { canManageResources } from '@/lib/reservation-permissions';
 import { useAuth } from '@/providers/auth-provider';
 
@@ -42,11 +36,14 @@ export default function VehicleDetailPage({ params }: PageProps) {
 
   if (vehicleQuery.isError || !vehicleQuery.data) {
     return (
-      <ErrorState
-        title="Véhicule introuvable"
-        onRetry={() => {
-          void vehicleQuery.refetch();
-        }}
+      <DetailErrorState
+        error={vehicleQuery.error}
+        notFoundTitle="Véhicule introuvable"
+        errorTitle="Impossible de charger le véhicule"
+        backHref="/vehicles"
+        backLabel="Retour aux véhicules"
+        onRetry={() => void vehicleQuery.refetch()}
+        retrying={vehicleQuery.isFetching}
       />
     );
   }
@@ -54,68 +51,63 @@ export default function VehicleDetailPage({ params }: PageProps) {
   const vehicle = vehicleQuery.data;
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader
+        back={{ href: '/vehicles', label: 'Véhicules' }}
         title={`${vehicle.brand} ${vehicle.model}`}
-        description={`${vehicle.registrationNumber} · ${vehicle.company?.name ?? 'Entreprise'}`}
-        actions={<StatusBadge status={vehicle.status} />}
+        meta={
+          <>
+            <StatusBadge status={vehicle.status} />
+            <span className="font-mono uppercase">{vehicle.registrationNumber}</span>
+            {vehicle.company ? (
+              <span className="inline-flex items-center gap-1">
+                <Building2 className="size-3.5" aria-hidden />
+                {vehicle.company.name}
+              </span>
+            ) : null}
+          </>
+        }
       />
 
-      {canManage ? (
-        <div className="space-y-1.5 rounded-3xl bg-card p-5 ring-1 ring-border/60">
-          <Label>Statut du véhicule</Label>
-          <Select
-            value={vehicle.status}
-            onValueChange={(value) => {
-              if (value && value !== vehicle.status) {
-                statusMutation.mutate(value as ResourceStatus);
-              }
-            }}
-          >
-            <SelectTrigger className="w-full max-w-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(Object.keys(RESOURCE_STATUS_LABELS) as ResourceStatus[]).map(
-                (key) => (
-                  <SelectItem key={key} value={key}>
-                    {RESOURCE_STATUS_LABELS[key]}
-                  </SelectItem>
-                ),
-              )}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            Préférez le changement de statut à la suppression.
-          </p>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="min-w-0 lg:col-span-2">
+          {canManage ? (
+            <VehicleForm
+              initial={vehicle}
+              loading={updateMutation.isPending}
+              submitLabel="Enregistrer les modifications"
+              onSubmit={async (values) => {
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars -- companyId is immutable on update
+                const { companyId, ...payload } = values;
+                await updateMutation.mutateAsync(payload);
+              }}
+            />
+          ) : (
+            <Panel title="Caractéristiques">
+              <dl className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <dt className="text-xs font-medium text-muted-foreground">Places</dt>
+                  <dd className="text-sm text-foreground">{vehicle.seats}</dd>
+                </div>
+                <div className="sm:col-span-2">
+                  <dt className="text-xs font-medium text-muted-foreground">Description</dt>
+                  <dd className="text-sm whitespace-pre-line text-foreground">{vehicle.description || '—'}</dd>
+                </div>
+              </dl>
+            </Panel>
+          )}
         </div>
-      ) : null}
-
-      {canManage ? (
-        <VehicleForm
-          initial={vehicle}
-          loading={updateMutation.isPending}
-          submitLabel="Enregistrer les modifications"
-          onSubmit={async (values) => {
-            // companyId is immutable on update
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omit companyId
-            const { companyId, ...payload } = values;
-            await updateMutation.mutateAsync(payload);
-            void vehicleQuery.refetch();
-          }}
-        />
-      ) : (
-        <div className="space-y-3 rounded-3xl bg-card p-5 text-sm ring-1 ring-border/60">
-          <p>
-            <span className="text-muted-foreground">Places :</span>{' '}
-            {vehicle.seats}
-          </p>
-          <p>
-            <span className="text-muted-foreground">Description :</span>{' '}
-            {vehicle.description || '—'}
-          </p>
+        <div className="space-y-4">
+          <ResourceStatusPanel
+            status={vehicle.status}
+            resourceLabel="ce véhicule"
+            canManage={canManage}
+            pending={statusMutation.isPending}
+            onChange={(status) => statusMutation.mutate(status)}
+          />
+          <ResourceReservationsPanel vehicleId={vehicle.id} />
         </div>
-      )}
+      </div>
     </div>
   );
 }

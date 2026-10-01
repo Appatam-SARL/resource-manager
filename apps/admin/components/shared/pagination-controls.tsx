@@ -8,6 +8,8 @@ type PaginationControlsProps = {
   page: number;
   totalPages: number;
   total?: number;
+  /** Page size, used to display the "1–10 sur 124" range. */
+  limit?: number;
   onPageChange: (page: number) => void;
   className?: string;
 };
@@ -16,6 +18,7 @@ export function PaginationControls({
   page,
   totalPages,
   total,
+  limit,
   onPageChange,
   className,
 }: PaginationControlsProps) {
@@ -27,39 +30,46 @@ export function PaginationControls({
   const canPrev = page > 1;
   const canNext = page < safeTotalPages;
 
+  let summary = `Page ${page} sur ${safeTotalPages}`;
+  if (typeof total === 'number' && limit) {
+    const from = total === 0 ? 0 : (page - 1) * limit + 1;
+    const to = Math.min(page * limit, total);
+    summary = `${from}–${to} sur ${total}`;
+  } else if (typeof total === 'number') {
+    summary += ` · ${total} résultat${total > 1 ? 's' : ''}`;
+  }
+
   return (
-    <div
-      className={cn(
-        'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between',
-        className,
-      )}
+    <nav
+      aria-label="Pagination"
+      className={cn('flex items-center justify-between gap-3', className)}
     >
-      <p className="text-sm text-muted-foreground">
-        Page {page} sur {safeTotalPages}
-        {typeof total === 'number' ? ` · ${total} résultat${total > 1 ? 's' : ''}` : ''}
-      </p>
-      <div className="flex items-center gap-2">
+      <p className="text-[13px] text-muted-foreground tabular-nums">{summary}</p>
+      <div className="flex items-center gap-1">
+        <span className="mr-2 hidden text-[13px] text-muted-foreground tabular-nums sm:inline">
+          {page} / {safeTotalPages}
+        </span>
         <Button
           type="button"
           variant="outline"
-          size="sm"
+          size="icon-sm"
           disabled={!canPrev}
           onClick={() => onPageChange(page - 1)}
+          aria-label="Page précédente"
         >
           <ChevronLeft className="size-4" />
-          Précédent
         </Button>
         <Button
           type="button"
           variant="outline"
-          size="sm"
+          size="icon-sm"
           disabled={!canNext}
           onClick={() => onPageChange(page + 1)}
+          aria-label="Page suivante"
         >
-          Suivant
           <ChevronRight className="size-4" />
         </Button>
       </div>
-    </div>
+    </nav>
   );
 }

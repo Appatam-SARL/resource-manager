@@ -1,85 +1,120 @@
 'use client';
 
-import { useState } from 'react';
+import { use, useState } from 'react';
 import Link from 'next/link';
 import { Plus } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { ErrorState } from '@/components/shared/error-state';
 import { PageHeader } from '@/components/shared/page-header';
 import { PaginationControls } from '@/components/shared/pagination-controls';
-import { DirectionFilters } from '@/features/directions/components/direction-filters';
+import { Button, buttonVariants } from '@/components/ui/button';
+import {
+  DirectionFilters,
+  EMPTY_DIRECTION_FILTERS,
+  type DirectionListFilters,
+} from '@/features/directions/components/direction-filters';
 import { DirectionsTable } from '@/features/directions/components/directions-table';
 import { useDirections } from '@/features/directions/hooks/use-directions';
-import { useCompanies } from '@/features/companies/hooks/use-companies';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { useAuth } from '@/providers/auth-provider';
 
-export default function DirectionsPage() {
+const PAGE_SIZE = 10;
+
+type DirectionsPageProps = {
+  searchParams: Promise<{ companyId?: string | string[] }>;
+};
+
+export default function DirectionsPage({ searchParams }: DirectionsPageProps) {
+  const { companyId: initialCompanyId } = use(searchParams);
   const [page, setPage] = useState(1);
-  const [limit] = useState(10);
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('all');
-  const [companyId, setCompanyId] = useState('all');
+  const [filters, setFilters] = useState<DirectionListFilters>(() => ({
+    ...EMPTY_DIRECTION_FILTERS,
+    companyId: typeof initialCompanyId === 'string' ? initialCompanyId : '',
+  }));
+  const debouncedSearch = useDebouncedValue(filters.search.trim());
+  const { user } = useAuth();
+  // Other roles are scoped to their own company by the API; the company filter only exists for the Group admin.
+  const companyId = user?.role === 'GROUP_ADMIN' ? filters.companyId : '';
 
-  const { data: companiesData } = useCompanies({ page: 1, limit: 100 });
-
-  const params = {
+  const query = useDirections({
     page,
-    limit,
-    search: search.trim() || undefined,
-    status: status === 'all' ? undefined : status,
-    companyId: companyId === 'all' ? undefined : companyId,
+    limit: PAGE_SIZE,
+    search: debouncedSearch || undefined,
+    status: filters.status || undefined,
+    companyId: companyId || undefined,
+  });
+
+  const hasActiveFilters = Boolean(debouncedSearch || filters.status || companyId);
+  const meta = query.data?.meta;
+
+  const updateFilters = (next: Partial<DirectionListFilters>) => {
+    setFilters((current) => ({ ...current, ...next }));
+    setPage(1);
   };
 
-  const { data, isLoading, isError, error, refetch } = useDirections(params);
+  const createHref = companyId ? `/directions/new?companyId=${companyId}` : '/directions/new';
+  const createLink = (label: string) => (
+    <Link href={createHref} className={buttonVariants()}>
+      <Plus className="size-4" aria-hidden />
+      {label}
+    </Link>
+  );
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Directions"
-        description="Les directions sont optionnelles selon l’entreprise."
-        actions={
-          <Button render={<Link href="/directions/new" />}>
-            <Plus className="size-4" />
-            Nouvelle direction
-          </Button>
+        description="Niveau d’organisation facultatif : certaines entreprises fonctionnent sans direction."
+        meta={
+          meta ? (
+            <span className="tabular-nums">
+              {meta.total} direction{meta.total > 1 ? 's' : ''}
+              {hasActiveFilters ? ' correspondant aux filtres' : ''}
+            </span>
+          ) : null
         }
+        actions={createLink('Nouvelle direction')}
       />
 
-      <DirectionFilters
-        search={search}
-        status={status}
-        companyId={companyId}
-        companies={companiesData?.data ?? []}
-        onSearchChange={(value) => {
-          setSearch(value);
-          setPage(1);
-        }}
-        onStatusChange={(value) => {
-          setStatus(value);
-          setPage(1);
-        }}
-        onCompanyChange={(value) => {
-          setCompanyId(value);
-          setPage(1);
-        }}
-      />
-
-      {isError ? (
+      {query.isError ? (
         <ErrorState
-          message={error instanceof Error ? error.message : undefined}
-          onRetry={() => void refetch()}
+          title="Impossible de charger les directions"
+          onRetry={() => void query.refetch()}
+          retrying={query.isFetching}
         />
       ) : (
-        <>
-          <DirectionsTable data={data?.data ?? []} isLoading={isLoading} />
-          {data ? (
-            <PaginationControls
-              page={data.meta.page}
-              totalPages={data.meta.totalPages}
-              total={data.meta.total}
-              onPageChange={setPage}
-            />
-          ) : null}
-        </>
+        <DirectionsTable
+          data={query.data?.data ?? []}
+          isLoading={query.isLoading}
+          hasActiveFilters={hasActiveFilters}
+          toolbar={<DirectionFilters value={filters} onChange={updateFilters} />}
+          emptyAction={
+            hasActiveFilters ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setFilters(EMPTY_DIRECTION_FILTERS);
+                  setPage(1);
+                }}
+              >
+                Effacer les filtres
+              </Button>
+            ) : (
+              createLink('Créer une direction')
+            )
+          }
+          footer={
+            meta && meta.total > 0 ? (
+              <PaginationControls
+                page={meta.page}
+                totalPages={meta.totalPages}
+                total={meta.total}
+                limit={PAGE_SIZE}
+                onPageChange={setPage}
+              />
+            ) : undefined
+          }
+        />
       )}
     </div>
   );
