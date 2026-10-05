@@ -60,11 +60,8 @@ export class RoomsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Détail d’une salle de réunion' })
-  findOne(
-    @Param('id') id: string,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
-    return this.roomsService.findById(id, user);
+  findOne(@Param('id') id: string) {
+    return this.roomsService.findById(id);
   }
 
   @Patch(':id')

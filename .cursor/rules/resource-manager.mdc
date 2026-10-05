@@ -185,6 +185,16 @@ Par défaut, une ressource appartient à une seule entreprise.
 
 Une entreprise ne doit pas pouvoir réserver directement la ressource d'une autre entreprise, sauf si une règle métier spécifique de partage inter-entreprises est explicitement ajoutée.
 
+### RÈGLE DE PARTAGE GROUPE (EXPLICITEMENT DÉCIDÉE) — VÉHICULES ET SALLES
+
+Les véhicules et salles de réunion sont partagés par tout le Groupe :
+
+- `companyId` de la ressource = **entreprise gestionnaire** : seule elle (ou un GROUP_ADMIN) crée, modifie, change le statut ou supprime la ressource ;
+- tout utilisateur actif d'une entreprise active du Groupe peut consulter et réserver une ressource `AVAILABLE` dont l'entreprise gestionnaire est active (`GET /vehicles|/rooms?scope=group`) ; le scope par défaut `managed` reste réservé à l'administration ;
+- `Reservation.companyId` = **entreprise du demandeur** : l'approbation, le rejet et la visibilité suivent la hiérarchie du demandeur (Company Admin / Manager de sa direction) ;
+- la disponibilité d'une ressource ne révèle jamais le demandeur ni l'objet d'une réservation d'une autre entreprise (uniquement le créneau occupé) ;
+- les autres types de ressources futurs ne sont PAS partagés implicitement.
+
 ---
 
 # 6. RÉSERVATIONS
@@ -1506,7 +1516,7 @@ Ne jamais supposer qu'un utilisateur appartient obligatoirement à une Direction
 
 Ne jamais traiter les entreprises comme des tenants SaaS.
 
-Ne jamais permettre par défaut le partage de ressources entre entreprises.
+Ne jamais permettre par défaut le partage de ressources entre entreprises (exception explicite : véhicules et salles partagés par le Groupe, voir section 5).
 
 Ne jamais permettre à un utilisateur d'accéder aux données d'une autre entreprise sans permission explicite.
 

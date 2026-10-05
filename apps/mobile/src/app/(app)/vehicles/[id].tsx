@@ -1,6 +1,8 @@
 import { StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useVehicle } from '@/features/vehicles/hooks/use-vehicles';
+import { useVehicleImageSource } from '@/features/vehicles/hooks/use-vehicle-image-source';
 import { Screen } from '@/components/ui/Screen';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -8,11 +10,12 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { LoadingState } from '@/components/ui/LoadingState';
-import { colors, spacing } from '@/constants/theme';
+import { colors, radius, spacing } from '@/constants/theme';
 
 export default function VehicleDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const query = useVehicle(id);
+  const vehicleImageSource = useVehicleImageSource();
 
   if (query.isLoading) {
     return (
@@ -43,9 +46,19 @@ export default function VehicleDetailScreen() {
   }
 
   const canReserve = vehicle.status === 'AVAILABLE';
+  const imageSource = vehicleImageSource(vehicle);
 
   return (
     <Screen scroll>
+      {imageSource ? (
+        <Image
+          source={imageSource}
+          style={styles.photo}
+          contentFit="cover"
+          transition={150}
+          accessibilityLabel={`Photo du véhicule ${vehicle.brand} ${vehicle.model}`}
+        />
+      ) : null}
       <View style={styles.header}>
         <Text style={styles.title}>
           {vehicle.brand} {vehicle.model}
@@ -90,6 +103,13 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
+  photo: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    borderRadius: radius.lg,
+    marginBottom: spacing.lg,
+    backgroundColor: colors.border,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',

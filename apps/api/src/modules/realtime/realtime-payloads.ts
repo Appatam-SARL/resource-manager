@@ -38,6 +38,7 @@ export function toReservationEventData(
 export function toReservationAvailabilityData(
   reservation: RealtimeReservationSource,
   resourceId: string,
+  resourceCompanyId: string,
   changedAt: Date,
 ): ResourceAvailabilityChangedData {
   const resource =
@@ -47,7 +48,7 @@ export function toReservationAvailabilityData(
   return {
     resourceType: reservation.resourceType,
     resourceId,
-    companyId: reservation.companyId,
+    companyId: resourceCompanyId,
     reason: 'RESERVATION_CHANGED',
     resourceStatus: resource?.status ?? null,
     changedAt: changedAt.toISOString(),

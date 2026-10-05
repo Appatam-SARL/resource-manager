@@ -39,3 +39,12 @@ export function canCancelReservation(
 export function canManageResources(role: AuthUser['role']): boolean {
   return role === 'GROUP_ADMIN' || role === 'COMPANY_ADMIN';
 }
+
+/** Resources are visible to the whole Group but administered only by their managing company. */
+export function canManageResource(
+  user: AuthUser,
+  resource: { companyId: string },
+): boolean {
+  if (user.role === 'GROUP_ADMIN') return true;
+  return user.role === 'COMPANY_ADMIN' && user.companyId === resource.companyId;
+}

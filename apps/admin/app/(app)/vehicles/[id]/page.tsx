@@ -11,11 +11,12 @@ import { StatusBadge } from '@/components/shared/status-badge';
 import { ResourceReservationsPanel } from '@/features/reservations';
 import {
   VehicleForm,
+  VehicleImagePanel,
   useUpdateVehicle,
   useUpdateVehicleStatus,
   useVehicle,
 } from '@/features/vehicles';
-import { canManageResources } from '@/lib/reservation-permissions';
+import { canManageResource } from '@/lib/reservation-permissions';
 import { useAuth } from '@/providers/auth-provider';
 
 type PageProps = {
@@ -28,8 +29,6 @@ export default function VehicleDetailPage({ params }: PageProps) {
   const vehicleQuery = useVehicle(id);
   const updateMutation = useUpdateVehicle(id);
   const statusMutation = useUpdateVehicleStatus(id);
-  const canManage = user ? canManageResources(user.role) : false;
-
   if (vehicleQuery.isLoading) {
     return <LoadingState label="Chargement du véhicule…" />;
   }
@@ -49,6 +48,7 @@ export default function VehicleDetailPage({ params }: PageProps) {
   }
 
   const vehicle = vehicleQuery.data;
+  const canManage = user ? canManageResource(user, vehicle) : false;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -98,6 +98,7 @@ export default function VehicleDetailPage({ params }: PageProps) {
           )}
         </div>
         <div className="space-y-4">
+          <VehicleImagePanel vehicle={vehicle} canManage={canManage} />
           <ResourceStatusPanel
             status={vehicle.status}
             resourceLabel="ce véhicule"

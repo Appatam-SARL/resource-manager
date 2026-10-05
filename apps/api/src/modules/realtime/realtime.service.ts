@@ -55,11 +55,12 @@ export class RealtimeService {
       toReservationEventData(reservation, resourceId),
     );
 
-    if (options.availabilityChanged) {
+    const resourceCompanyId = (reservation.vehicle ?? reservation.room)?.companyId;
+    if (options.availabilityChanged && resourceCompanyId) {
       this.emit(
-        getResourceAudienceRooms(reservation.companyId),
+        getResourceAudienceRooms(),
         REALTIME_EVENTS.RESOURCE_AVAILABILITY_CHANGED,
-        toReservationAvailabilityData(reservation, resourceId, new Date()),
+        toReservationAvailabilityData(reservation, resourceId, resourceCompanyId, new Date()),
       );
     }
   }
@@ -69,7 +70,7 @@ export class RealtimeService {
     resource: RealtimeResourceSource,
   ): void {
     this.emit(
-      getResourceAudienceRooms(resource.companyId),
+      getResourceAudienceRooms(),
       REALTIME_EVENTS.RESOURCE_CREATED,
       toResourceEventData(resourceType, resource),
     );
@@ -80,7 +81,7 @@ export class RealtimeService {
     resource: RealtimeResourceSource,
   ): void {
     this.emit(
-      getResourceAudienceRooms(resource.companyId),
+      getResourceAudienceRooms(),
       REALTIME_EVENTS.RESOURCE_UPDATED,
       toResourceEventData(resourceType, resource),
     );
@@ -92,7 +93,7 @@ export class RealtimeService {
     reason: ResourceAvailabilityReason,
   ): void {
     this.emit(
-      getResourceAudienceRooms(resource.companyId),
+      getResourceAudienceRooms(),
       REALTIME_EVENTS.RESOURCE_AVAILABILITY_CHANGED,
       toResourceAvailabilityData(resourceType, resource, reason),
     );
@@ -103,7 +104,7 @@ export class RealtimeService {
     resource: { id: string; companyId: string },
   ): void {
     this.emit(
-      getResourceAudienceRooms(resource.companyId),
+      getResourceAudienceRooms(),
       REALTIME_EVENTS.RESOURCE_DELETED,
       { resourceType, resourceId: resource.id, companyId: resource.companyId },
     );

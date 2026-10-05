@@ -1,6 +1,7 @@
 import { Plus_Jakarta_Sans, Geist_Mono } from 'next/font/google';
 import type { Metadata } from 'next';
 import { connection } from 'next/server';
+import type { ReactNode } from 'react';
 import { Toaster } from 'sonner';
 import { EnvironmentBanner } from '@/components/layout/environment-banner';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -24,7 +25,7 @@ export const metadata: Metadata = {
   description: 'Administration des ressources du Groupe',
 };
 
-export default async function RootLayout({ children }: LayoutProps<'/'>) {
+export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   // Render per request so deployment variables are read at runtime, never baked into the build.
   await connection();
   const runtimeConfig = readServerRuntimeConfig();

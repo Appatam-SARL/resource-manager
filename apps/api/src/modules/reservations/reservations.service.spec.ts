@@ -45,6 +45,7 @@ function makeUser(
 describe('ReservationsService', () => {
   let service: ReservationsService;
   let prisma: {
+    company: { findUnique: ReturnType<typeof vi.fn> };
     vehicle: { findUnique: ReturnType<typeof vi.fn> };
     meetingRoom: { findUnique: ReturnType<typeof vi.fn> };
     reservation: {
@@ -70,6 +71,7 @@ describe('ReservationsService', () => {
 
   beforeEach(() => {
     prisma = {
+      company: { findUnique: vi.fn().mockResolvedValue({ status: EntityStatus.ACTIVE }) },
       vehicle: { findUnique: vi.fn() },
       meetingRoom: { findUnique: vi.fn() },
       reservation: {
@@ -255,13 +257,10 @@ describe('ReservationsService', () => {
     });
   });
 
-  describe('create — cross-company', () => {
-    it('forbids reserving a vehicle from another company', async () => {
-      const actor = makeUser({
-        role: Role.EMPLOYEE,
-        companyId: 'company-a',
-      });
+  describe('create — resources shared by the Group', () => {
+    const employeeA = makeUser({ id: 'employee-a', role: Role.EMPLOYEE, companyId: 'company-a' });
 
+    it('lets an employee of company A book a vehicle managed by company B', async () => {
       prisma.vehicle.findUnique.mockResolvedValue({
         id: 'vehicle-b',
         companyId: 'company-b',
@@ -270,12 +269,131 @@ describe('ReservationsService', () => {
         registrationNumber: 'BB-001-CC',
         company: { id: 'company-b', status: EntityStatus.ACTIVE, name: 'B' },
       });
+      prisma.reservation.create.mockResolvedValue({ id: 'res-1', companyId: 'company-a' });
+
+      await service.create(
+        {
+          resourceType: ResourceType.VEHICLE,
+          vehicleId: 'vehicle-b',
+          startAt: futureStart,
+          endAt: futureEnd,
+          destination: 'Abidjan',
+          missionReason: 'Mission',
+          passengerCount: 2,
+        },
+        employeeA,
+      );
+
+      expect(prisma.reservation.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ companyId: 'company-a', vehicleId: 'vehicle-b' }),
+        }),
+      );
+    });
+
+    it('lets an employee of company A book a room managed by company B', async () => {
+      prisma.meetingRoom.findUnique.mockResolvedValue({
+        id: 'room-b',
+        companyId: 'company-b',
+        capacity: 10,
+        status: ResourceStatus.AVAILABLE,
+        name: 'Salle B',
+        company: { id: 'company-b', status: EntityStatus.ACTIVE, name: 'B' },
+      });
+      prisma.reservation.create.mockResolvedValue({ id: 'res-2', companyId: 'company-a' });
+
+      await service.create(
+        {
+          resourceType: ResourceType.ROOM,
+          roomId: 'room-b',
+          startAt: futureStart,
+          endAt: futureEnd,
+          meetingSubject: 'Réunion',
+          participantCount: 4,
+        },
+        employeeA,
+      );
+
+      expect(prisma.reservation.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ companyId: 'company-a', roomId: 'room-b' }),
+        }),
+      );
+    });
+
+    it("stores the requester's company so the requester's hierarchy validates the request", async () => {
+      prisma.vehicle.findUnique.mockResolvedValue({
+        id: 'vehicle-b',
+        companyId: 'company-b',
+        seats: 5,
+        status: ResourceStatus.AVAILABLE,
+        registrationNumber: 'BB-001-CC',
+        company: { id: 'company-b', status: EntityStatus.ACTIVE, name: 'B' },
+      });
+      prisma.reservation.create.mockResolvedValue({ id: 'res-1', companyId: 'company-a' });
+      prisma.user.findMany.mockResolvedValue([{ id: 'manager-a' }]);
+
+      await service.create(
+        {
+          resourceType: ResourceType.VEHICLE,
+          vehicleId: 'vehicle-b',
+          startAt: futureStart,
+          endAt: futureEnd,
+          destination: 'Abidjan',
+          missionReason: 'Mission',
+          passengerCount: 2,
+        },
+        employeeA,
+      );
+
+      expect(prisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            OR: expect.arrayContaining([expect.objectContaining({ companyId: 'company-a' })]),
+          }),
+        }),
+      );
+      expect(prisma.user.findMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            OR: expect.arrayContaining([expect.objectContaining({ companyId: 'company-b' })]),
+          }),
+        }),
+      );
+    });
+
+    it('lets the approvers of the requester company approve, not those of the managing company', () => {
+      const reservation = { companyId: 'company-a', directionId: null, userId: 'employee-a' };
+      const adminA = makeUser({ role: Role.COMPANY_ADMIN, companyId: 'company-a' });
+      const adminB = makeUser({ role: Role.COMPANY_ADMIN, companyId: 'company-b' });
+
+      expect(accessScope.canApproveReservation(adminA, reservation)).toBe(true);
+      expect(accessScope.canApproveReservation(adminB, reservation)).toBe(false);
+    });
+  });
+
+  describe('create — inactive company / unavailable resource', () => {
+    it("rejects reservation when the requester's company is inactive", async () => {
+      const actor = makeUser({
+        role: Role.EMPLOYEE,
+        companyId: 'company-a',
+      });
+
+      prisma.company.findUnique.mockResolvedValue({ status: EntityStatus.INACTIVE });
+      prisma.vehicle.findUnique.mockResolvedValue({
+        id: 'vehicle-1',
+        companyId: 'company-b',
+        seats: 5,
+        status: ResourceStatus.AVAILABLE,
+        registrationNumber: 'AA-001-BB',
+        company: { id: 'company-b', status: EntityStatus.ACTIVE, name: 'B' },
+      });
 
       await expect(
         service.create(
           {
             resourceType: ResourceType.VEHICLE,
-            vehicleId: 'vehicle-b',
+            vehicleId: 'vehicle-1',
             startAt: futureStart,
             endAt: futureEnd,
             destination: 'Abidjan',
@@ -284,61 +402,11 @@ describe('ReservationsService', () => {
           },
           actor,
         ),
-      ).rejects.toBeInstanceOf(ForbiddenException);
+      ).rejects.toThrow('entreprise inactive');
+      expect(prisma.reservation.create).not.toHaveBeenCalled();
     });
 
-    it('stores companyId from the resource, not from the actor alone', async () => {
-      const actor = makeUser({
-        role: Role.GROUP_ADMIN,
-        companyId: 'company-admin-home',
-      });
-
-      prisma.vehicle.findUnique.mockResolvedValue({
-        id: 'vehicle-1',
-        companyId: 'company-resource',
-        seats: 5,
-        status: ResourceStatus.AVAILABLE,
-        registrationNumber: 'AA-001-BB',
-        company: {
-          id: 'company-resource',
-          status: EntityStatus.ACTIVE,
-          name: 'Resource Co',
-        },
-      });
-      prisma.reservation.findMany.mockResolvedValue([]);
-      prisma.reservation.create.mockResolvedValue({
-        id: 'res-1',
-        companyId: 'company-resource',
-      });
-      prisma.user.findMany.mockResolvedValue([]);
-
-      await service.create(
-        {
-          resourceType: ResourceType.VEHICLE,
-          vehicleId: 'vehicle-1',
-          startAt: futureStart,
-          endAt: futureEnd,
-          destination: 'Abidjan',
-          missionReason: 'Mission',
-          passengerCount: 2,
-        },
-        actor,
-      );
-
-      expect(prisma.reservation.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            companyId: 'company-resource',
-            vehicleId: 'vehicle-1',
-            userId: actor.id,
-          }),
-        }),
-      );
-    });
-  });
-
-  describe('create — inactive company / unavailable resource', () => {
-    it('rejects reservation when company is inactive', async () => {
+    it('rejects reservation when the managing company of the resource is inactive', async () => {
       const actor = makeUser({
         role: Role.EMPLOYEE,
         companyId: 'company-a',
@@ -346,11 +414,11 @@ describe('ReservationsService', () => {
 
       prisma.vehicle.findUnique.mockResolvedValue({
         id: 'vehicle-1',
-        companyId: 'company-a',
+        companyId: 'company-b',
         seats: 5,
         status: ResourceStatus.AVAILABLE,
         registrationNumber: 'AA-001-BB',
-        company: { id: 'company-a', status: EntityStatus.INACTIVE, name: 'A' },
+        company: { id: 'company-b', status: EntityStatus.INACTIVE, name: 'B' },
       });
 
       await expect(
@@ -834,10 +902,17 @@ describe('ReservationsService', () => {
       expect(realtime.publishReservation).not.toHaveBeenCalled();
     });
 
-    it('publishes nothing when the actor is not allowed (other company)', async () => {
-      const outsider = makeUser({ id: 'employee-b', role: Role.EMPLOYEE, companyId: 'company-b' });
+    it('publishes nothing when the resource is not bookable (maintenance)', async () => {
+      prisma.vehicle.findUnique.mockResolvedValue({
+        id: 'vehicle-1',
+        companyId: 'company-b',
+        seats: 5,
+        status: ResourceStatus.MAINTENANCE,
+        registrationNumber: 'AA-001-BB',
+        company: { id: 'company-b', status: EntityStatus.ACTIVE, name: 'B' },
+      });
 
-      await expect(service.create(vehicleDto, outsider)).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(service.create(vehicleDto, actor)).rejects.toBeInstanceOf(BadRequestException);
       expect(realtime.publishReservation).not.toHaveBeenCalled();
     });
 

@@ -47,7 +47,7 @@ function toRoomCard(room: MeetingRoom): ResourceCardData {
   return {
     id: room.id,
     title: room.name,
-    subtitle: room.location,
+    subtitle: [room.location, room.company?.name].filter(Boolean).join(' · ') || null,
     capacityLabel: pluralize(room.capacity, 'personne', 'personnes'),
     statusLabel: RESOURCE_STATUS_LABELS[room.status],
     statusColor: statusColor(room.status),
@@ -91,7 +91,7 @@ export function RoomReservationForm({ initialRoomId, onSuccess }: RoomReservatio
     endTime: values.endTime ?? defaultSchedule.endTime,
   };
 
-  const roomsQuery = useRooms({ page: 1, limit: 50, status: 'AVAILABLE' });
+  const roomsQuery = useRooms({ page: 1, limit: 100, status: 'AVAILABLE', scope: 'group' });
   const listed = roomsQuery.data?.data ?? [];
   const listedRoom = listed.find((r) => r.id === roomId);
   const detailQuery = useRoom(roomId && !listedRoom && roomsQuery.isSuccess ? roomId : undefined);
@@ -233,7 +233,7 @@ export function RoomReservationForm({ initialRoomId, onSuccess }: RoomReservatio
           isError={roomsQuery.isError}
           onRetry={() => void roomsQuery.refetch()}
           emptyTitle="Aucune salle disponible"
-          emptyMessage="Aucune salle de votre entreprise n’est actuellement ouverte à la réservation."
+          emptyMessage="Aucune salle du Groupe n’est actuellement ouverte à la réservation."
           error={formState.errors.roomId?.message}
         />
       </FormSection>

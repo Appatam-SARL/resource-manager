@@ -15,7 +15,7 @@ import {
   useUpdateRoom,
   useUpdateRoomStatus,
 } from '@/features/rooms';
-import { canManageResources } from '@/lib/reservation-permissions';
+import { canManageResource } from '@/lib/reservation-permissions';
 import { useAuth } from '@/providers/auth-provider';
 
 type PageProps = {
@@ -28,8 +28,6 @@ export default function RoomDetailPage({ params }: PageProps) {
   const roomQuery = useRoom(id);
   const updateMutation = useUpdateRoom(id);
   const statusMutation = useUpdateRoomStatus(id);
-  const canManage = user ? canManageResources(user.role) : false;
-
   if (roomQuery.isLoading) {
     return <LoadingState label="Chargement de la salle…" />;
   }
@@ -49,6 +47,7 @@ export default function RoomDetailPage({ params }: PageProps) {
   }
 
   const room = roomQuery.data;
+  const canManage = user ? canManageResource(user, room) : false;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">

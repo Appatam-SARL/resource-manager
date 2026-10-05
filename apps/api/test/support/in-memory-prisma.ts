@@ -58,6 +58,11 @@ function withoutUndefined(data: Row): Row {
 export interface InMemoryPrismaOptions {
   /** Emulates `pg_advisory_xact_lock`; disabled only to prove the concurrency test is meaningful. */
   honorAdvisoryLocks?: boolean;
+  /**
+   * Holds every transaction at the lock point until this many have reached it, so concurrent
+   * requests deterministically interleave instead of depending on HTTP timing.
+   */
+  lockPointBarrier?: number;
 }
 
 /**
@@ -73,8 +78,21 @@ export class InMemoryPrisma {
   readonly reservations = new Map<string, Row>();
   readonly notifications: Row[] = [];
   private readonly locks = new Map<string, Promise<void>>();
+  private barrierArrivals = 0;
+  private readonly barrierWaiters: Array<() => void> = [];
 
   constructor(private readonly options: InMemoryPrismaOptions = {}) {}
+
+  private async waitAtLockPointBarrier(): Promise<void> {
+    const expected = this.options.lockPointBarrier;
+    if (!expected) return;
+    this.barrierArrivals += 1;
+    if (this.barrierArrivals >= expected) {
+      this.barrierWaiters.splice(0).forEach((resume) => resume());
+      return;
+    }
+    await new Promise<void>((resolve) => this.barrierWaiters.push(resolve));
+  }
 
   seedCompany(company: { id: string; name: string }, status: EntityStatus = EntityStatus.ACTIVE) {
     this.companies.set(company.id, { ...company, status });
@@ -127,7 +145,16 @@ export class InMemoryPrisma {
         ? { id: user.id, firstName: user.firstName, lastName: user.lastName, email: user.email, directionId: user.directionId }
         : null,
       vehicle: vehicle
-        ? { id: vehicle.id, registrationNumber: vehicle.registrationNumber, brand: vehicle.brand, model: vehicle.model, seats: vehicle.seats, status: vehicle.status }
+        ? {
+            id: vehicle.id,
+            companyId: vehicle.companyId,
+            company: this.companyRef(vehicle.companyId),
+            registrationNumber: vehicle.registrationNumber,
+            brand: vehicle.brand,
+            model: vehicle.model,
+            seats: vehicle.seats,
+            status: vehicle.status,
+          }
         : null,
       room: null,
     };
@@ -157,6 +184,13 @@ export class InMemoryPrisma {
       if (!row) throw new Error('Record to update not found.');
       Object.assign(row, withoutUndefined(data), { updatedAt: new Date() });
       return this.hydrateUser(row);
+    },
+  };
+
+  readonly company = {
+    findUnique: async ({ where }: { where: { id: string } }) => {
+      await tick();
+      return this.companyRef(where.id);
     },
   };
 
@@ -265,6 +299,7 @@ export class InMemoryPrisma {
       reservation: this.reservation,
       notification: this.notification,
       $executeRaw: async (_sql: TemplateStringsArray, ...values: unknown[]) => {
+        await this.waitAtLockPointBarrier();
         if (this.options.honorAdvisoryLocks !== false) {
           heldLocks.push(await this.acquireLock(String(values[0])));
         }

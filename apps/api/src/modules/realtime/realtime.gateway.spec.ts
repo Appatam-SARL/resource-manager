@@ -1,7 +1,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import type { Socket } from 'socket.io';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { actors, companies } from '../../../test/fixtures/organization.js';
+import { actors } from '../../../test/fixtures/organization.js';
 import type { RealtimeAuthService } from './realtime-auth.service.js';
 import { REALTIME_ERROR_CODES, REALTIME_MAX_CONNECTIONS_PER_USER } from './realtime.constants.js';
 import { RealtimeGateway } from './realtime.gateway.js';
@@ -101,7 +101,7 @@ describe('RealtimeGateway', () => {
 
       expect(socket.join).toHaveBeenCalledWith([
         `user:${actors.managerTech.id}`,
-        `company:${companies.appatam.id}`,
+        'group:members',
         `direction:${actors.managerTech.directionId}:reservations`,
       ]);
     });

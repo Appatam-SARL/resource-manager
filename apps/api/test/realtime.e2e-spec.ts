@@ -2,7 +2,7 @@ import { ValidationPipe, type INestApplication } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
-import { UserStatus } from '@prisma/client';
+import { EntityStatus, UserStatus } from '@prisma/client';
 import { io, type Socket as ClientSocket } from 'socket.io-client';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -276,7 +276,10 @@ describe('Realtime WebSocket (e2e, multi-clients)', () => {
       await silence();
       expect(colleague.events(REALTIME_EVENTS.RESERVATION_CREATED)).toHaveLength(0);
       expect(managerCom.events(REALTIME_EVENTS.RESERVATION_CREATED)).toHaveLength(0);
-      expect(otherCompany.received).toHaveLength(0);
+      // Resources are shared by the Group: another company only sees the availability change.
+      expect(otherCompany.received.map((r) => r.event)).toEqual([
+        REALTIME_EVENTS.RESOURCE_AVAILABILITY_CHANGED,
+      ]);
 
       const serialized = JSON.stringify([...companyAdmin.received, ...colleague.received]);
       expect(serialized).not.toContain('passwordHash');
@@ -324,8 +327,9 @@ describe('Realtime WebSocket (e2e, multi-clients)', () => {
     it('emits nothing when the REST command is refused', async () => {
       const companyAdmin = await connectAs(actors.companyAdminA);
 
+      harness.prisma.companies.get(companies.entrepriseB.id)!.status = EntityStatus.INACTIVE;
       const refused = await (await api(actors.employeeB)).post('/reservations', vehicleReservationBody());
-      expect(refused.status).toBe(403);
+      expect(refused.status).toBe(400);
       const invalid = await (await api(actors.employeeA)).post('/reservations', { ...vehicleReservationBody(), passengerCount: 9 });
       expect(invalid.status).toBe(400);
 
@@ -374,7 +378,7 @@ describe('Realtime WebSocket (e2e, multi-clients)', () => {
 
 describe('Realtime e2e harness sanity', () => {
   it('without the database lock, concurrent bookings would both succeed (the lock test is meaningful)', async () => {
-    const harness = await startHarness({ honorAdvisoryLocks: false });
+    const harness = await startHarness({ honorAdvisoryLocks: false, lockPointBarrier: 2 });
     try {
       const server = harness.app.getHttpServer();
       const [tokenA, tokenCom] = await Promise.all([

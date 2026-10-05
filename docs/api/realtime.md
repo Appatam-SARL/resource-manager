@@ -56,12 +56,12 @@ Le client ne choisit aucune room. Elles sont dérivées de l'utilisateur recharg
 | Room | Membres |
 |---|---|
 | `user:{userId}` | L'utilisateur lui-même (ses notifications et ses réservations) |
-| `company:{companyId}` | Tous les membres de l'entreprise (ressources, disponibilité) |
+| `group:members` | Tous les utilisateurs du Groupe (ressources et disponibilité des véhicules et salles, partagés par le Groupe) |
 | `company:{companyId}:reservations` | `COMPANY_ADMIN` ; `MANAGER` **sans** direction (périmètre entreprise) |
 | `direction:{directionId}:reservations` | `MANAGER` rattaché à cette direction |
 | `group` | `GROUP_ADMIN` |
 
-Une réservation n'est envoyée qu'aux rooms dont les membres peuvent la lire via `GET /reservations/:id`. La même règle, `AccessScopeService.canViewReservation`, est utilisée côté REST et côté WebSocket, et un test vérifie cette équivalence pour tous les rôles. Aucune donnée n'est diffusée à une autre entreprise.
+Une réservation n'est envoyée qu'aux rooms dont les membres peuvent la lire via `GET /reservations/:id`. La même règle, `AccessScopeService.canViewReservation`, est utilisée côté REST et côté WebSocket, et un test vérifie cette équivalence pour tous les rôles. Aucune réservation n'est diffusée à une autre entreprise. Seuls les événements de ressource et de disponibilité partent vers `group:members` ; ils portent le `companyId` de l'entreprise gestionnaire et ne contiennent ni demandeur ni objet.
 
 ## Événements
 

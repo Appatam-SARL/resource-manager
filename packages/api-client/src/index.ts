@@ -58,13 +58,13 @@ function extractErrorMessage(
   return `Erreur API (${status})`;
 }
 
-async function request<T>(
+async function send(
   options: ApiClientOptions,
   path: string,
   init: RequestInit = {},
-): Promise<T> {
+): Promise<Response> {
   const headers = new Headers(init.headers);
-  if (init.body !== undefined) {
+  if (init.body !== undefined && !(init.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
   }
   const token = options.getAccessToken?.();
@@ -90,7 +90,15 @@ async function request<T>(
     }
     throw new ApiError(response.status, body, payload);
   }
+  return response;
+}
 
+async function request<T>(
+  options: ApiClientOptions,
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const response = await send(options, path, init);
   if (response.status === 204) {
     return undefined as T;
   }
@@ -239,6 +247,23 @@ export function createApiClient(options: ApiClientOptions) {
       request<Vehicle>(options, `/api/v1/vehicles/${id}/status`, {
         method: 'PATCH',
         body: JSON.stringify(body),
+      }),
+
+    getVehicleImage: async (id: string) =>
+      (await send(options, `/api/v1/vehicles/${id}/image`)).blob(),
+
+    uploadVehicleImage: (id: string, image: Blob, fileName = 'vehicle.jpg') => {
+      const body = new FormData();
+      body.append('file', image, fileName);
+      return request<Vehicle>(options, `/api/v1/vehicles/${id}/image`, {
+        method: 'PUT',
+        body,
+      });
+    },
+
+    deleteVehicleImage: (id: string) =>
+      request<Vehicle>(options, `/api/v1/vehicles/${id}/image`, {
+        method: 'DELETE',
       }),
 
     getRooms: (params?: ListQueryParams) =>

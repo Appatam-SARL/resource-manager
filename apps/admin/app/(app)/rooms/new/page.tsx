@@ -26,7 +26,7 @@ export default function NewRoomPage() {
       <PageHeader
         back={{ href: '/rooms', label: 'Salles' }}
         title="Nouvelle salle"
-        description="La salle sera immédiatement réservable par les collaborateurs de son entreprise."
+        description="La salle sera immédiatement réservable par les collaborateurs du Groupe."
       />
       <RoomForm
         loading={createMutation.isPending}

@@ -42,13 +42,8 @@ export class RoomsService {
   ) {}
 
   async list(actor: AuthenticatedUser, query: ListRoomsQueryDto) {
-    const companyId = this.accessScope.resolveCompanyFilter(
-      actor,
-      query.companyId,
-    );
-
     const where: Prisma.MeetingRoomWhereInput = {
-      ...(companyId ? { companyId } : {}),
+      ...this.accessScope.resourceListWhere(actor, query.scope, query.companyId),
       ...(query.status ? { status: query.status } : {}),
       ...(query.search
         ? {
@@ -73,7 +68,8 @@ export class RoomsService {
     return paginate(data, total, query.page, query.limit);
   }
 
-  async findById(id: string, actor: AuthenticatedUser) {
+  /** Rooms are shared by the whole Group: any member may read them. */
+  async findById(id: string) {
     const room = await this.prisma.meetingRoom.findUnique({
       where: { id },
       select: roomSelect,
@@ -81,7 +77,6 @@ export class RoomsService {
     if (!room) {
       throw new NotFoundException('Salle de réunion introuvable.');
     }
-    this.accessScope.assertCanAccessCompany(actor, room.companyId);
     return room;
   }
 
@@ -113,7 +108,7 @@ export class RoomsService {
   }
 
   async update(id: string, dto: UpdateRoomDto, actor: AuthenticatedUser) {
-    const existing = await this.findById(id, actor);
+    const existing = await this.findById(id);
     this.accessScope.assertCanManageCompany(actor, existing.companyId);
 
     const room = await this.prisma.meetingRoom.update({
@@ -151,7 +146,7 @@ export class RoomsService {
     status: ResourceStatus,
     actor: AuthenticatedUser,
   ) {
-    const existing = await this.findById(id, actor);
+    const existing = await this.findById(id);
     this.accessScope.assertCanManageCompany(actor, existing.companyId);
 
     const room = await this.prisma.meetingRoom.update({
@@ -177,7 +172,7 @@ export class RoomsService {
   }
 
   async remove(id: string, actor: AuthenticatedUser) {
-    const existing = await this.findById(id, actor);
+    const existing = await this.findById(id);
     this.accessScope.assertCanManageCompany(actor, existing.companyId);
 
     const reservationCount = await this.prisma.reservation.count({

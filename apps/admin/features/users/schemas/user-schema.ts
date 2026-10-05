@@ -15,7 +15,7 @@ export const createUserSchema = z.object({
   password: z
     .string()
     .min(8, 'Le mot de passe doit contenir au moins 8 caractères')
-    .max(128, 'Le mot de passe ne peut pas dépasser 128 caractères'),
+    .max(72, 'Le mot de passe ne peut pas dépasser 72 caractères'),
   firstName: z
     .string()
     .min(1, 'Le prénom est requis')
@@ -36,7 +36,7 @@ export const updateUserSchema = z.object({
     .email('Adresse e-mail invalide'),
   password: z
     .string()
-    .max(128, 'Le mot de passe ne peut pas dépasser 128 caractères')
+    .max(72, 'Le mot de passe ne peut pas dépasser 72 caractères')
     .optional()
     .or(z.literal(''))
     .refine(

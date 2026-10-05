@@ -64,7 +64,7 @@ export function RoomForm({
           }
         })}
       >
-        <FormSection title="Rattachement" description="Entreprise propriétaire de la salle. Seuls ses collaborateurs peuvent la réserver.">
+        <FormSection title="Rattachement" description="Entreprise gestionnaire de la salle. Elle seule peut la modifier ; tout le Groupe peut la réserver.">
           <Controller
             control={form.control}
             name="companyId"

@@ -19,11 +19,11 @@ export class UpdateUserDto {
   @IsEmail({}, { message: 'Email invalide.' })
   email?: string;
 
-  @ApiPropertyOptional({ example: 'Password123!', minLength: 8 })
+  @ApiPropertyOptional({ example: 'Password123!', minLength: 8, maxLength: 72 })
   @IsOptional()
   @IsString()
   @MinLength(8)
-  @MaxLength(128)
+  @MaxLength(72)
   password?: string;
 
   @ApiPropertyOptional({ example: 'Jean' })

@@ -16,7 +16,7 @@ import { LoadingState } from '@/components/ui/LoadingState';
 import { colors, spacing } from '@/constants/theme';
 
 export default function RoomsListScreen() {
-  const query = useRooms({ page: 1, limit: 50 });
+  const query = useRooms({ page: 1, limit: 100, scope: 'group' });
 
   if (query.isLoading && !query.data) {
     return (
@@ -55,7 +55,7 @@ export default function RoomsListScreen() {
         ListEmptyComponent={
           <EmptyState
             title="Aucune salle"
-            description="Aucune salle n’est disponible dans votre périmètre."
+            description="Aucune salle n’est disponible dans le Groupe."
           />
         }
         renderItem={({ item }) => (
@@ -70,6 +70,7 @@ export default function RoomsListScreen() {
             </View>
             <Text style={styles.meta}>{item.location ?? 'Sans lieu précisé'}</Text>
             <Text style={styles.meta}>{item.capacity} places</Text>
+            {item.company ? <Text style={styles.meta}>Gérée par {item.company.name}</Text> : null}
           </Card>
         )}
       />

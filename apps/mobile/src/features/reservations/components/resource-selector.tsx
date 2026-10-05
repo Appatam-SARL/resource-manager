@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, type ImageSource } from 'expo-image';
 import Animated, { ReduceMotion, ZoomIn } from 'react-native-reanimated';
 import { AlertCircle, CircleCheck, RefreshCw, Users, type LucideIcon } from 'lucide-react-native';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -12,6 +13,8 @@ export type ResourceCardData = {
   capacityLabel: string;
   statusLabel: string;
   statusColor: string;
+  /** Optional photo shown instead of the type icon. */
+  imageSource?: ImageSource | null;
 };
 
 export type SlotAvailability = 'available' | 'unavailable' | null;
@@ -55,9 +58,19 @@ export const ResourceCard = memo(function ResourceCard({
       ]}
     >
       <View style={styles.cardTop}>
-        <View style={[styles.iconTile, selected && styles.iconTileSelected]}>
-          <Icon size={22} color={selected ? colors.white : colors.primary} />
-        </View>
+        {resource.imageSource ? (
+          <Image
+            source={resource.imageSource}
+            style={styles.photoTile}
+            contentFit="cover"
+            transition={150}
+            accessibilityIgnoresInvertColors
+          />
+        ) : (
+          <View style={[styles.iconTile, selected && styles.iconTileSelected]}>
+            <Icon size={22} color={selected ? colors.white : colors.primary} />
+          </View>
+        )}
         {selected ? (
           <Animated.View entering={ZoomIn.duration(180).reduceMotion(ReduceMotion.System)}>
             <CircleCheck size={24} color={colors.white} fill={colors.primary} />
@@ -285,6 +298,12 @@ const styles = StyleSheet.create({
   },
   iconTileSelected: {
     backgroundColor: colors.primary,
+  },
+  photoTile: {
+    width: 72,
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: colors.primaryMuted,
   },
   radio: {
     width: 22,

@@ -10,7 +10,7 @@ import {
   ResourceType,
   ReservationStatus,
 } from '@prisma/client';
-import * as argon2 from 'argon2';
+import { hash } from 'bcryptjs';
 import { existsSync } from 'node:fs';
 import { assertDevOnlyCommand } from './dev-guard';
 
@@ -35,7 +35,7 @@ async function main() {
   await prisma.company.deleteMany();
   await prisma.group.deleteMany();
 
-  const passwordHash = await argon2.hash(DEV_PASSWORD);
+  const passwordHash = await hash(DEV_PASSWORD, 12);
 
   const group = await prisma.group.create({
     data: { name: 'Groupe Appatam' },

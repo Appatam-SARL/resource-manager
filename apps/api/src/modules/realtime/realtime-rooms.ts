@@ -8,8 +8,8 @@ import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js
 export const realtimeRooms = {
   /** GROUP_ADMIN: every company of the Group. */
   group: () => 'group',
-  /** Every member of a company: resource list and availability. */
-  company: (companyId: string) => `company:${companyId}`,
+  /** Every member of the Group: vehicles and rooms are shared, so are their list and availability. */
+  members: () => 'group:members',
   /** COMPANY_ADMIN and MANAGER without direction: all reservations of the company. */
   companyReservations: (companyId: string) =>
     `company:${companyId}:reservations`,
@@ -21,10 +21,7 @@ export const realtimeRooms = {
 };
 
 export function getUserRooms(user: AuthenticatedUser): string[] {
-  const rooms = [
-    realtimeRooms.user(user.id),
-    realtimeRooms.company(user.companyId),
-  ];
+  const rooms = [realtimeRooms.user(user.id), realtimeRooms.members()];
 
   if (user.role === Role.GROUP_ADMIN) {
     rooms.push(realtimeRooms.group());
@@ -57,6 +54,7 @@ export function getReservationAudienceRooms(reservation: {
   return rooms;
 }
 
-export function getResourceAudienceRooms(companyId: string): string[] {
-  return [realtimeRooms.group(), realtimeRooms.company(companyId)];
+/** Resource events carry no reservation detail: the whole Group may receive them. */
+export function getResourceAudienceRooms(): string[] {
+  return [realtimeRooms.members()];
 }

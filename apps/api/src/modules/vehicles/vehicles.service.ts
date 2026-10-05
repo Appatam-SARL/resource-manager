@@ -22,6 +22,10 @@ import { RealtimeService } from '../realtime/realtime.service.js';
 import { CreateVehicleDto } from './dto/create-vehicle.dto.js';
 import { ListVehiclesQueryDto } from './dto/list-vehicles-query.dto.js';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto.js';
+import {
+  type UploadedImageFile,
+  validateVehicleImage,
+} from './vehicle-image.js';
 
 const vehicleSelect = {
   id: true,
@@ -35,6 +39,7 @@ const vehicleSelect = {
   createdAt: true,
   updatedAt: true,
   company: { select: { id: true, name: true } },
+  image: { select: { mimeType: true, size: true, updatedAt: true } },
 } satisfies Prisma.VehicleSelect;
 
 @Injectable()
@@ -47,13 +52,8 @@ export class VehiclesService {
   ) {}
 
   async list(actor: AuthenticatedUser, query: ListVehiclesQueryDto) {
-    const companyId = this.accessScope.resolveCompanyFilter(
-      actor,
-      query.companyId,
-    );
-
     const where: Prisma.VehicleWhereInput = {
-      ...(companyId ? { companyId } : {}),
+      ...this.accessScope.resourceListWhere(actor, query.scope, query.companyId),
       ...(query.status ? { status: query.status } : {}),
       ...(query.search
         ? {
@@ -84,7 +84,8 @@ export class VehiclesService {
     return paginate(data, total, query.page, query.limit);
   }
 
-  async findById(id: string, actor: AuthenticatedUser) {
+  /** Vehicles are shared by the whole Group: any member may read them. */
+  async findById(id: string) {
     const vehicle = await this.prisma.vehicle.findUnique({
       where: { id },
       select: vehicleSelect,
@@ -92,7 +93,6 @@ export class VehiclesService {
     if (!vehicle) {
       throw new NotFoundException('Véhicule introuvable.');
     }
-    this.accessScope.assertCanAccessCompany(actor, vehicle.companyId);
     return vehicle;
   }
 
@@ -133,7 +133,7 @@ export class VehiclesService {
   }
 
   async update(id: string, dto: UpdateVehicleDto, actor: AuthenticatedUser) {
-    const existing = await this.findById(id, actor);
+    const existing = await this.findById(id);
     this.accessScope.assertCanManageCompany(actor, existing.companyId);
 
     try {
@@ -177,7 +177,7 @@ export class VehiclesService {
     status: ResourceStatus,
     actor: AuthenticatedUser,
   ) {
-    const existing = await this.findById(id, actor);
+    const existing = await this.findById(id);
     this.accessScope.assertCanManageCompany(actor, existing.companyId);
 
     const vehicle = await this.prisma.vehicle.update({
@@ -203,7 +203,7 @@ export class VehiclesService {
   }
 
   async remove(id: string, actor: AuthenticatedUser) {
-    const existing = await this.findById(id, actor);
+    const existing = await this.findById(id);
     this.accessScope.assertCanManageCompany(actor, existing.companyId);
 
     const reservationCount = await this.prisma.reservation.count({
@@ -262,6 +262,73 @@ export class VehiclesService {
       deactivated: false,
       message: 'Véhicule supprimé.',
     };
+  }
+
+  async getImage(id: string) {
+    const image = await this.prisma.vehicleImage.findUnique({
+      where: { vehicleId: id },
+      select: { data: true, mimeType: true, size: true, updatedAt: true },
+    });
+    if (!image) {
+      throw new NotFoundException('Ce véhicule n’a pas d’image.');
+    }
+    return image;
+  }
+
+  async setImage(
+    id: string,
+    file: UploadedImageFile | undefined,
+    actor: AuthenticatedUser,
+  ) {
+    const existing = await this.findById(id);
+    this.accessScope.assertCanManageCompany(actor, existing.companyId);
+    const mimeType = validateVehicleImage(file);
+    const { buffer, size } = file as UploadedImageFile;
+    const data = new Uint8Array(buffer);
+
+    await this.prisma.vehicleImage.upsert({
+      where: { vehicleId: id },
+      create: { vehicleId: id, data, mimeType, size },
+      update: { data, mimeType, size },
+    });
+    const vehicle = await this.findById(id);
+
+    await this.audit.log({
+      userId: actor.id,
+      action: AuditAction.UPDATE,
+      entity: 'Vehicle',
+      entityId: id,
+      metadata: {
+        image: existing.image ? 'replaced' : 'added',
+        mimeType,
+        size,
+      },
+    });
+
+    this.realtime.publishResourceUpdated(ResourceType.VEHICLE, vehicle);
+    return vehicle;
+  }
+
+  async removeImage(id: string, actor: AuthenticatedUser) {
+    const existing = await this.findById(id);
+    this.accessScope.assertCanManageCompany(actor, existing.companyId);
+    if (!existing.image) {
+      return existing;
+    }
+
+    await this.prisma.vehicleImage.delete({ where: { vehicleId: id } });
+    const vehicle = await this.findById(id);
+
+    await this.audit.log({
+      userId: actor.id,
+      action: AuditAction.UPDATE,
+      entity: 'Vehicle',
+      entityId: id,
+      metadata: { image: 'removed' },
+    });
+
+    this.realtime.publishResourceUpdated(ResourceType.VEHICLE, vehicle);
+    return vehicle;
   }
 
   private async assertCompanyExists(companyId: string) {

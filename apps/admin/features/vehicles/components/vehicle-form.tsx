@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { Vehicle } from '@resource-manager/types';
@@ -15,10 +16,12 @@ import {
   vehicleFormSchema,
   type VehicleFormValues,
 } from '@/features/vehicles/schemas/vehicle-schema';
+import { VehicleImagePicker } from './vehicle-image-picker';
 
 type VehicleFormProps = {
   initial?: Vehicle;
-  onSubmit: (values: VehicleFormValues) => Promise<void> | void;
+  /** `imageFile` is only collected on creation; on edit the photo has its own panel. */
+  onSubmit: (values: VehicleFormValues, extras: { imageFile: File | null }) => Promise<void> | void;
   submitLabel?: string;
   loading?: boolean;
   cancelHref?: string;
@@ -34,6 +37,7 @@ export function VehicleForm({
   const { user } = useAuth();
   const isEdit = Boolean(initial);
   const canChooseCompany = user?.role === 'GROUP_ADMIN' && !isEdit;
+  const [imageFile, setImageFile] = useState<File | null>(null);
 
   const form = useForm<VehicleFormValues>({
     resolver: zodResolver(vehicleFormSchema),
@@ -54,14 +58,14 @@ export function VehicleForm({
         noValidate
         onSubmit={form.handleSubmit(async (values) => {
           try {
-            await onSubmit({ ...values, description: values.description || undefined });
+            await onSubmit({ ...values, description: values.description || undefined }, { imageFile });
             form.reset(values);
           } catch {
             // The mutation already reports the error with a toast; keep the user's input.
           }
         })}
       >
-        <FormSection title="Rattachement" description="Entreprise propriétaire du véhicule. Seuls ses collaborateurs peuvent le réserver.">
+        <FormSection title="Rattachement" description="Entreprise gestionnaire du véhicule. Elle seule peut le modifier ; tout le Groupe peut le réserver.">
           <Controller
             control={form.control}
             name="companyId"
@@ -111,6 +115,12 @@ export function VehicleForm({
             <Textarea id="description" rows={4} {...form.register('description')} />
           </FormField>
         </FormSection>
+
+        {!isEdit ? (
+          <FormSection title="Photo" description="Facultative. Aide les collaborateurs à reconnaître le véhicule.">
+            <VehicleImagePicker file={imageFile} onChange={setImageFile} disabled={loading} />
+          </FormSection>
+        ) : null}
 
         <FormActions>
           {cancelHref ? (

@@ -8,10 +8,10 @@ import {
 } from './realtime-rooms.js';
 
 describe('realtime rooms', () => {
-  it('GROUP_ADMIN joins the Group room, its personal room and its company', () => {
+  it('GROUP_ADMIN joins the Group room, its personal room and the Group members room', () => {
     expect(getUserRooms(actors.groupAdmin)).toEqual([
       `user:${actors.groupAdmin.id}`,
-      `company:${companies.appatam.id}`,
+      'group:members',
       'group',
     ]);
   });
@@ -35,22 +35,22 @@ describe('realtime rooms', () => {
     );
   });
 
-  it('EMPLOYEE, with or without direction, only gets personal and company rooms', () => {
+  it('EMPLOYEE, with or without direction, only gets personal and Group members rooms', () => {
     expect(getUserRooms(actors.employeeA)).toEqual([
       `user:${actors.employeeA.id}`,
-      `company:${companies.appatam.id}`,
+      'group:members',
     ]);
     expect(getUserRooms(actors.employeeC)).toEqual([
       `user:${actors.employeeC.id}`,
-      `company:${companies.entrepriseC.id}`,
+      'group:members',
     ]);
   });
 
-  it('sends resource events to the Group admins and the members of the owning company only', () => {
-    expect(getResourceAudienceRooms(companies.entrepriseB.id)).toEqual([
-      'group',
-      `company:${companies.entrepriseB.id}`,
-    ]);
+  it('sends resource events to every member of the Group (vehicles and rooms are shared)', () => {
+    expect(getResourceAudienceRooms()).toEqual(['group:members']);
+    for (const actor of Object.values(actors)) {
+      expect(getUserRooms(actor)).toContain('group:members');
+    }
   });
 
   describe('reservation audience mirrors AccessScopeService.canViewReservation', () => {

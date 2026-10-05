@@ -1,7 +1,8 @@
 import { ForbiddenException } from '@nestjs/common';
-import { Role, UserStatus } from '@prisma/client';
+import { EntityStatus, Role, UserStatus } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
 import type { AuthenticatedUser } from '../../modules/auth/types/authenticated-user.type.js';
+import { ResourceListScope } from '../dto/resource-list-scope.js';
 import { AccessScopeService } from './access-scope.service.js';
 
 function makeUser(
@@ -99,6 +100,35 @@ describe('AccessScopeService', () => {
         companyId: 'company-a',
       });
       expect(() => service.companyWhere(companyAdmin, 'company-b')).toThrow(
+        ForbiddenException,
+      );
+    });
+  });
+
+  describe('resourceListWhere', () => {
+    const employee = makeUser({ role: Role.EMPLOYEE, companyId: 'company-a' });
+
+    it('managed scope (default) keeps resources of the user company', () => {
+      expect(service.resourceListWhere(employee)).toEqual({ companyId: 'company-a' });
+      expect(service.resourceListWhere(employee, ResourceListScope.MANAGED)).toEqual({ companyId: 'company-a' });
+    });
+
+    it('group scope exposes resources of every active company of the Group', () => {
+      expect(service.resourceListWhere(employee, ResourceListScope.GROUP)).toEqual({
+        company: { status: EntityStatus.ACTIVE },
+      });
+    });
+
+    it('group scope may narrow to one managing company, even another one', () => {
+      expect(service.resourceListWhere(employee, ResourceListScope.GROUP, 'company-b')).toEqual({
+        companyId: 'company-b',
+        company: { status: EntityStatus.ACTIVE },
+      });
+    });
+
+    it('managed scope still refuses another company', () => {
+      const companyAdmin = makeUser({ role: Role.COMPANY_ADMIN, companyId: 'company-a' });
+      expect(() => service.resourceListWhere(companyAdmin, ResourceListScope.MANAGED, 'company-b')).toThrow(
         ForbiddenException,
       );
     });

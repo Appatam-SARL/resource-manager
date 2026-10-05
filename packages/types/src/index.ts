@@ -138,6 +138,13 @@ export type User = {
   direction?: DirectionSummary;
 };
 
+/** Metadata only: the bytes are served by GET /vehicles/:id/image (authenticated). */
+export type VehicleImageInfo = {
+  mimeType: string;
+  size: number;
+  updatedAt: string;
+};
+
 export type Vehicle = {
   id: string;
   companyId: string;
@@ -150,6 +157,7 @@ export type Vehicle = {
   createdAt: string;
   updatedAt: string;
   company?: CompanySummary;
+  image?: VehicleImageInfo | null;
 };
 
 export type MeetingRoom = {
@@ -200,6 +208,8 @@ export type Reservation = {
     model: string;
     seats?: number;
     status?: ResourceStatus;
+    companyId?: string;
+    company?: CompanySummary;
   } | null;
   room?: {
     id: string;
@@ -207,6 +217,8 @@ export type Reservation = {
     location: string | null;
     capacity?: number;
     status?: ResourceStatus;
+    companyId?: string;
+    company?: CompanySummary;
   } | null;
 };
 

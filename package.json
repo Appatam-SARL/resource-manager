@@ -23,7 +23,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.16.2",
-    "argon2": "^0.44.0"
+    "bcryptjs": "^3.0.3"
   },
   "devDependencies": {
     "prisma": "^6.16.2",
@@ -37,7 +37,6 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "argon2",
       "@prisma/client",
       "@prisma/engines",
       "prisma",

@@ -24,7 +24,8 @@ const reservation: RealtimeReservationSource = {
   startAt: new Date('2026-10-01T08:00:00.000Z'),
   endAt: new Date('2026-10-01T10:00:00.000Z'),
   updatedAt: new Date('2026-09-30T12:00:00.000Z'),
-  vehicle: { status: ResourceStatus.AVAILABLE },
+  // Shared resource: booked by an Appatam employee, managed by Entreprise B.
+  vehicle: { companyId: companies.entrepriseB.id, status: ResourceStatus.AVAILABLE },
   room: null,
 };
 
@@ -92,16 +93,17 @@ describe('RealtimeService', () => {
     expect(emit).toHaveBeenCalledWith(type, expect.objectContaining({ type }));
   });
 
-  it('resource.availability.changed goes to the whole company without reservation details', () => {
+  it('resource.availability.changed goes to the whole Group without reservation details', () => {
     service.publishReservation(REALTIME_EVENTS.RESERVATION_CANCELLED, reservation, { availabilityChanged: true });
 
-    expect(server.to).toHaveBeenLastCalledWith(['group', `company:${companies.appatam.id}`]);
+    expect(server.to).toHaveBeenLastCalledWith(['group:members']);
     const [event, envelope] = emit.mock.calls.at(-1) as [string, { data: Record<string, unknown> }];
     expect(event).toBe(REALTIME_EVENTS.RESOURCE_AVAILABILITY_CHANGED);
+    // companyId is the managing company: the requester's company is never broadcast.
     expect(envelope.data).toEqual({
       resourceType: ResourceType.VEHICLE,
       resourceId: vehicles.corollaA.id,
-      companyId: companies.appatam.id,
+      companyId: companies.entrepriseB.id,
       reason: 'RESERVATION_CHANGED',
       resourceStatus: ResourceStatus.AVAILABLE,
       changedAt: expect.any(String),
@@ -129,7 +131,7 @@ describe('RealtimeService', () => {
       'STATUS_CHANGED',
     );
 
-    expect(server.to).toHaveBeenCalledWith(['group', `company:${companies.entrepriseB.id}`]);
+    expect(server.to).toHaveBeenCalledWith(['group:members']);
     expect(emit).toHaveBeenCalledWith(
       REALTIME_EVENTS.RESOURCE_AVAILABILITY_CHANGED,
       expect.objectContaining({

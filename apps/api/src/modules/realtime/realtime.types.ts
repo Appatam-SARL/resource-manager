@@ -52,12 +52,13 @@ export type ResourceAvailabilityReason =
   | 'RESERVATION_CHANGED';
 
 /**
- * Sent to every member of the resource's company: it never carries the reservation
- * or the requester, only the fact that the availability must be refreshed.
+ * Sent to every member of the Group: it never carries the reservation or the
+ * requester, only the fact that the availability must be refreshed.
  */
 export type ResourceAvailabilityChangedData = {
   resourceType: ResourceType;
   resourceId: string;
+  /** Managing company of the resource (never the requester's company). */
   companyId: string;
   reason: ResourceAvailabilityReason;
   /** Current resource status when known. */
@@ -99,8 +100,8 @@ export type RealtimeReservationSource = {
   startAt: Date;
   endAt: Date;
   updatedAt: Date;
-  vehicle?: { status: ResourceStatus } | null;
-  room?: { status: ResourceStatus } | null;
+  vehicle?: { companyId: string; status: ResourceStatus } | null;
+  room?: { companyId: string; status: ResourceStatus } | null;
 };
 
 export type RealtimeResourceSource = {

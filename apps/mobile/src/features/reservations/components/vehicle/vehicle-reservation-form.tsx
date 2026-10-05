@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { Controller, useForm, useWatch, type FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { CalendarClock, Car, FileText, MapPin, MessageSquare, Target, Users } from 'lucide-react-native';
+import type { ImageSource } from 'expo-image';
 import type { Vehicle } from '@resource-manager/types';
 import { useVehicle, useVehicles } from '@/features/vehicles/hooks/use-vehicles';
+import { useVehicleImageSource } from '@/features/vehicles/hooks/use-vehicle-image-source';
 import {
   validatePassengerCountAgainstSeats,
   vehicleReservationSchema,
@@ -43,11 +45,12 @@ const DEFAULT_DURATION_MINUTES = 180;
 
 type Section = 'resource' | 'schedule' | 'availability' | 'details';
 
-function toVehicleCard(vehicle: Vehicle): ResourceCardData {
+function toVehicleCard(vehicle: Vehicle, imageSource: ImageSource | null): ResourceCardData {
   return {
+    imageSource,
     id: vehicle.id,
     title: `${vehicle.brand} ${vehicle.model}`,
-    subtitle: vehicle.registrationNumber,
+    subtitle: [vehicle.registrationNumber, vehicle.company?.name].filter(Boolean).join(' · '),
     capacityLabel: pluralize(vehicle.seats, 'place', 'places'),
     statusLabel: RESOURCE_STATUS_LABELS[vehicle.status],
     statusColor: statusColor(vehicle.status),
@@ -92,7 +95,8 @@ export function VehicleReservationForm({ initialVehicleId, onSuccess }: VehicleR
     endTime: values.endTime ?? defaultSchedule.endTime,
   };
 
-  const vehiclesQuery = useVehicles({ page: 1, limit: 50, status: 'AVAILABLE' });
+  const vehiclesQuery = useVehicles({ page: 1, limit: 100, status: 'AVAILABLE', scope: 'group' });
+  const vehicleImageSource = useVehicleImageSource();
   const listed = vehiclesQuery.data?.data ?? [];
   const listedVehicle = listed.find((v) => v.id === vehicleId);
   const detailQuery = useVehicle(vehicleId && !listedVehicle && vehiclesQuery.isSuccess ? vehicleId : undefined);
@@ -227,7 +231,7 @@ export function VehicleReservationForm({ initialVehicleId, onSuccess }: VehicleR
     >
       <FormSection step={1} title="Véhicule" description="Choisissez le véhicule de votre déplacement" onLayout={register('resource')}>
         <ResourceSelector
-          items={vehicles.map(toVehicleCard)}
+          items={vehicles.map((vehicle) => toVehicleCard(vehicle, vehicleImageSource(vehicle)))}
           icon={Car}
           selectedId={vehicleId}
           slotAvailability={
@@ -242,7 +246,7 @@ export function VehicleReservationForm({ initialVehicleId, onSuccess }: VehicleR
           isError={vehiclesQuery.isError}
           onRetry={() => void vehiclesQuery.refetch()}
           emptyTitle="Aucun véhicule disponible"
-          emptyMessage="Aucun véhicule de votre entreprise n’est actuellement ouvert à la réservation."
+          emptyMessage="Aucun véhicule du Groupe n’est actuellement ouvert à la réservation."
           error={formState.errors.vehicleId?.message}
         />
       </FormSection>

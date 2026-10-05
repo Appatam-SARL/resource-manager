@@ -2,8 +2,9 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-import { Prisma, Role } from '@prisma/client';
+import { EntityStatus, Prisma, Role } from '@prisma/client';
 import type { AuthenticatedUser } from '../../modules/auth/types/authenticated-user.type.js';
+import { ResourceListScope } from '../dto/resource-list-scope.js';
 
 @Injectable()
 export class AccessScopeService {
@@ -54,6 +55,26 @@ export class AccessScopeService {
       throw new ForbiddenException('Accès refusé à cette entreprise.');
     }
     return user.companyId;
+  }
+
+  /**
+   * Vehicles and meeting rooms are shared by the whole Group (explicit business rule):
+   * every member may see and book them; only their managing company administers them
+   * (canManageCompany). GROUP scope lists the resources of active companies.
+   */
+  resourceListWhere(
+    user: AuthenticatedUser,
+    scope: ResourceListScope = ResourceListScope.MANAGED,
+    requestedCompanyId?: string,
+  ): { companyId?: string; company?: { status: EntityStatus } } {
+    if (scope === ResourceListScope.GROUP) {
+      return {
+        ...(requestedCompanyId ? { companyId: requestedCompanyId } : {}),
+        company: { status: EntityStatus.ACTIVE },
+      };
+    }
+    const companyId = this.resolveCompanyFilter(user, requestedCompanyId);
+    return companyId ? { companyId } : {};
   }
 
   companyWhere(

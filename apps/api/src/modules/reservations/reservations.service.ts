@@ -94,20 +94,24 @@ const reservationSelect = {
   vehicle: {
     select: {
       id: true,
+      companyId: true,
       registrationNumber: true,
       brand: true,
       model: true,
       seats: true,
       status: true,
+      company: { select: { id: true, name: true } },
     },
   },
   room: {
     select: {
       id: true,
+      companyId: true,
       name: true,
       location: true,
       capacity: true,
       status: true,
+      company: { select: { id: true, name: true } },
     },
   },
 } satisfies Prisma.ReservationSelect;
@@ -127,8 +131,7 @@ export class ReservationsService {
     const endAt = new Date(query.endAt);
     this.assertValidRange(startAt, endAt, { allowPast: true });
 
-    const { companyId } = await this.resolveResourceForAccess(
-      actor,
+    const { companyId } = await this.resolveResourceCompany(
       query.resourceType,
       query.resourceId,
     );
@@ -629,7 +632,7 @@ export class ReservationsService {
     }
 
     const resource = await this.getReservationResourceState(existing);
-    this.assertCompanyActive(resource.companyStatus);
+    this.assertManagingCompanyActive(resource.companyStatus);
     this.assertResourceAvailable(resource.status, resource.kindLabel);
 
     const { count } = await this.withResourceLock(existing, async (tx) => {
@@ -781,8 +784,8 @@ export class ReservationsService {
       throw new NotFoundException('Véhicule introuvable.');
     }
 
-    this.accessScope.assertCanAccessCompany(actor, vehicle.companyId);
-    this.assertCompanyActive(vehicle.company.status);
+    await this.assertRequesterCompanyActive(actor);
+    this.assertManagingCompanyActive(vehicle.company.status);
     this.assertResourceAvailable(vehicle.status, 'véhicule');
 
     if (dto.passengerCount > vehicle.seats) {
@@ -804,7 +807,7 @@ export class ReservationsService {
 
       return tx.reservation.create({
         data: {
-          companyId: vehicle.companyId,
+          companyId: actor.companyId,
           userId: actor.id,
           directionId: actor.directionId,
           resourceType: ResourceType.VEHICLE,
@@ -829,7 +832,8 @@ export class ReservationsService {
       metadata: {
         resourceType: ResourceType.VEHICLE,
         vehicleId: vehicle.id,
-        companyId: vehicle.companyId,
+        companyId: actor.companyId,
+        resourceCompanyId: vehicle.companyId,
       },
     });
 
@@ -841,7 +845,7 @@ export class ReservationsService {
 
     await this.notifyReservationCreated(
       actor,
-      vehicle.companyId,
+      actor.companyId,
       reservation.id,
       `le véhicule ${vehicle.registrationNumber}`,
     );
@@ -880,8 +884,8 @@ export class ReservationsService {
       throw new NotFoundException('Salle de réunion introuvable.');
     }
 
-    this.accessScope.assertCanAccessCompany(actor, room.companyId);
-    this.assertCompanyActive(room.company.status);
+    await this.assertRequesterCompanyActive(actor);
+    this.assertManagingCompanyActive(room.company.status);
     this.assertResourceAvailable(room.status, 'salle');
 
     if (dto.participantCount > room.capacity) {
@@ -902,7 +906,7 @@ export class ReservationsService {
 
       return tx.reservation.create({
         data: {
-          companyId: room.companyId,
+          companyId: actor.companyId,
           userId: actor.id,
           directionId: actor.directionId,
           resourceType: ResourceType.ROOM,
@@ -926,7 +930,8 @@ export class ReservationsService {
       metadata: {
         resourceType: ResourceType.ROOM,
         roomId: room.id,
-        companyId: room.companyId,
+        companyId: actor.companyId,
+        resourceCompanyId: room.companyId,
       },
     });
 
@@ -938,7 +943,7 @@ export class ReservationsService {
 
     await this.notifyReservationCreated(
       actor,
-      room.companyId,
+      actor.companyId,
       reservation.id,
       `la salle ${room.name}`,
     );
@@ -946,8 +951,8 @@ export class ReservationsService {
     return reservation;
   }
 
-  private async resolveResourceForAccess(
-    actor: AuthenticatedUser,
+  /** Vehicles and rooms are shared by the Group: any member may check their availability. */
+  private async resolveResourceCompany(
     resourceType: ResourceType,
     resourceId: string,
   ): Promise<{ companyId: string }> {
@@ -959,7 +964,6 @@ export class ReservationsService {
       if (!vehicle) {
         throw new NotFoundException('Véhicule introuvable.');
       }
-      this.accessScope.assertCanAccessCompany(actor, vehicle.companyId);
       return { companyId: vehicle.companyId };
     }
 
@@ -970,7 +974,6 @@ export class ReservationsService {
     if (!room) {
       throw new NotFoundException('Salle de réunion introuvable.');
     }
-    this.accessScope.assertCanAccessCompany(actor, room.companyId);
     return { companyId: room.companyId };
   }
 
@@ -997,10 +1000,22 @@ export class ReservationsService {
     }
   }
 
-  private assertCompanyActive(status: EntityStatus): void {
-    if (status !== EntityStatus.ACTIVE) {
+  private async assertRequesterCompanyActive(actor: AuthenticatedUser): Promise<void> {
+    const company = await this.prisma.company.findUnique({
+      where: { id: actor.companyId },
+      select: { status: true },
+    });
+    if (company?.status !== EntityStatus.ACTIVE) {
       throw new BadRequestException(
         'Impossible de créer une réservation pour une entreprise inactive.',
+      );
+    }
+  }
+
+  private assertManagingCompanyActive(status: EntityStatus): void {
+    if (status !== EntityStatus.ACTIVE) {
+      throw new BadRequestException(
+        'Cette ressource est gérée par une entreprise inactive et ne peut pas être réservée.',
       );
     }
   }
