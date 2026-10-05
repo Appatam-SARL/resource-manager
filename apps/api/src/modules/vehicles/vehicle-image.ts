@@ -1,0 +1,51 @@
+import { BadRequestException } from '@nestjs/common';
+
+export const VEHICLE_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+
+/** Hard multer cap protecting memory; the business limit above returns a French message. */
+export const VEHICLE_IMAGE_UPLOAD_LIMIT_BYTES = 5 * 1024 * 1024;
+
+export type VehicleImageMimeType = 'image/jpeg' | 'image/png' | 'image/webp';
+
+export type UploadedImageFile = {
+  buffer: Buffer;
+  size: number;
+};
+
+/**
+ * The client-declared MIME type is untrusted: the format is detected from the file signature.
+ * SVG and other formats are refused (no scriptable content is ever served back).
+ */
+export function detectImageMimeType(buffer: Buffer): VehicleImageMimeType | null {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (
+    buffer.length >= 8 &&
+    buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  ) {
+    return 'image/png';
+  }
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) {
+    return 'image/webp';
+  }
+  return null;
+}
+
+export function validateVehicleImage(file: UploadedImageFile | undefined): VehicleImageMimeType {
+  if (!file || file.size === 0) {
+    throw new BadRequestException('Aucune image reçue.');
+  }
+  if (file.size > VEHICLE_IMAGE_MAX_BYTES) {
+    throw new BadRequestException('L’image ne doit pas dépasser 2 Mo.');
+  }
+  const mimeType = detectImageMimeType(file.buffer);
+  if (!mimeType) {
+    throw new BadRequestException('Format d’image non pris en charge (JPEG, PNG ou WebP).');
+  }
+  return mimeType;
+}

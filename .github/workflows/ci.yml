@@ -1,0 +1,203 @@
+# Continuous integration and STAGING delivery.
+#
+#   pull_request → quality + integration
+#   push dev     → quality + integration → images (ghcr.io, tag = commit SHA) → deploy STAGING
+#   push main    → quality + integration → images (promoted later, never rebuilt)
+#
+# Required GitHub configuration (see docs/devops/staging.md):
+#   Environment "staging"  secrets RENDER_API_DEPLOY_HOOK, RENDER_ADMIN_DEPLOY_HOOK
+#   Repository variables   STAGING_API_URL, STAGING_ADMIN_URL
+
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: '22'
+  TURBO_TELEMETRY_DISABLED: '1'
+  NEXT_TELEMETRY_DISABLED: '1'
+
+jobs:
+  quality:
+    name: Lint · Typecheck · Tests unitaires
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Lint, typecheck and unit tests (api, admin, mobile)
+        run: pnpm turbo run lint typecheck test
+
+      - name: Database command guards
+        run: pnpm test:guards
+
+  integration:
+    name: Migrations · Tests d'intégration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: resource_manager_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ci -d resource_manager_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci-only-password@localhost:5432/resource_manager_ci?schema=public
+      SHADOW_DATABASE_URL: postgresql://ci:ci-only-password@localhost:5432/resource_manager_shadow?schema=public
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Apply migrations on an empty database (migrate deploy only)
+        run: pnpm db:migrate:deploy
+
+      - name: Detect schema changes without a migration
+        run: |
+          PGPASSWORD=ci-only-password psql -h localhost -U ci -d postgres \
+            -c 'CREATE DATABASE resource_manager_shadow'
+          pnpm exec prisma migrate diff \
+            --from-migrations prisma/migrations \
+            --to-schema-datamodel prisma/schema.prisma \
+            --shadow-database-url "$SHADOW_DATABASE_URL" \
+            --exit-code
+
+      - name: API end-to-end tests
+        run: pnpm --filter api test:e2e
+
+  images:
+    name: Image ${{ matrix.app }}
+    needs: [quality, integration]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        app: [api, admin]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image name and version
+        id: meta
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          {
+            echo "image=ghcr.io/${owner}/resource-manager-${{ matrix.app }}"
+            echo "version=$(node -p "require('./apps/${{ matrix.app }}/package.json').version")"
+            echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (tag = commit SHA)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.image }}:${{ github.sha }}
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.version }}
+            GIT_COMMIT_SHA=${{ github.sha }}
+            BUILD_DATE=${{ steps.meta.outputs.build_date }}
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+
+  deploy-staging:
+    name: Déploiement STAGING
+    needs: [images]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_ADMIN_URL }}
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image names
+        id: meta
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          {
+            echo "api=ghcr.io/${owner}/resource-manager-api:${{ github.sha }}"
+            echo "admin=ghcr.io/${owner}/resource-manager-admin:${{ github.sha }}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy API (migrations run before start)
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_API_DEPLOY_HOOK }}
+          IMAGE: ${{ steps.meta.outputs.api }}
+          CHECK_URL: ${{ vars.STAGING_API_URL }}/api/v1/health
+          EXPECTED_COMMIT: ${{ github.sha }}
+          REQUIRE_TEXT: '"status":"ok"'
+        run: bash infrastructure/scripts/render-deploy.sh
+
+      - name: Deploy admin
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_ADMIN_DEPLOY_HOOK }}
+          IMAGE: ${{ steps.meta.outputs.admin }}
+          CHECK_URL: ${{ vars.STAGING_ADMIN_URL }}/login
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: bash infrastructure/scripts/render-deploy.sh
+
+      - name: Summary
+        run: |
+          {
+            echo "### STAGING déployé"
+            echo "- Commit : \`${GITHUB_SHA::7}\`"
+            echo "- API : ${{ steps.meta.outputs.api }}"
+            echo "- Admin : ${{ steps.meta.outputs.admin }}"
+          } >> "$GITHUB_STEP_SUMMARY"

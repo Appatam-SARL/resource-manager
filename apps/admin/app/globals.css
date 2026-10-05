@@ -1,26 +1,252 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-sans);
   --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-surface: var(--surface);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  /*
+   * Resource Manager — forest green brand on warm neutrals.
+   * Green is an accent (primary actions, active state, focus), never a background for whole areas.
+   */
+  --background: #f7f7f5;
+  --foreground: #17191c;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-foreground: #17191c;
+  --popover: #ffffff;
+  --popover-foreground: #17191c;
+  --primary: #1b4332;
+  --primary-foreground: #ffffff;
+  --secondary: #eaf1ed;
+  --secondary-foreground: #1b4332;
+  --muted: #f1f1ee;
+  --muted-foreground: #6a6e75;
+  /* Hover / highlighted items stay neutral so green keeps its meaning. */
+  --accent: #f1f1ee;
+  --accent-foreground: #17191c;
+  --destructive: #c8322b;
+  --border: #e6e6e2;
+  --input: #dcdcd7;
+  --ring: #2d6a4f;
+  --success: #2f7d55;
+  --warning: #b25d0e;
+  --info: #2f5fc4;
+  --chart-1: #1b4332;
+  --chart-2: #52b788;
+  --chart-3: #95d5b2;
+  --chart-4: #d8f3dc;
+  --chart-5: #6a6e75;
+  --radius: 0.5rem;
+  --sidebar: #fbfbf9;
+  --sidebar-foreground: #4a4e55;
+  --sidebar-primary: #1b4332;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #efefeb;
+  --sidebar-accent-foreground: #17191c;
+  --sidebar-border: #e8e8e4;
+  --sidebar-ring: #2d6a4f;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    text-rendering: optimizeLegibility;
+  }
+  html {
+    @apply font-sans;
+  }
+  ::selection {
+    @apply bg-primary/15;
   }
 }
 
-body {
-  background: var(--background);
+/*
+ * Type scale — one role per class, used instead of ad-hoc sizes:
+ * page title > section title > body (text-sm) > meta > eyebrow.
+ */
+@utility type-page-title {
+  font-size: 1.375rem;
+  line-height: 1.875rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  @media (width >= 48rem) {
+    font-size: 1.5rem;
+    line-height: 2rem;
+  }
+}
+@utility type-section-title {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--foreground);
+}
+@utility type-meta {
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+  color: var(--muted-foreground);
+}
+@utility type-eyebrow {
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+@utility type-metric {
+  font-size: 1.625rem;
+  line-height: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+}
+
+/* Horizontal chip rows scroll by touch / trackpad without a native bar. */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* The only elevated container: white, hairline border, no shadow. */
+@utility surface {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+/* FullCalendar, aligned on the design tokens (scoped to the admin calendar). */
+.rm-calendar .fc {
+  --fc-border-color: var(--border);
+  --fc-page-bg-color: var(--card);
+  --fc-neutral-bg-color: var(--muted);
+  --fc-today-bg-color: color-mix(in oklab, var(--primary) 4%, transparent);
+  --fc-now-indicator-color: var(--destructive);
+  font-family: inherit;
+  font-size: 13px;
+}
+.rm-calendar .fc-theme-standard .fc-scrollgrid {
+  border-left: 0;
+  border-right: 0;
+}
+.rm-calendar .fc .fc-col-header-cell-cushion {
+  padding: 10px 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  text-transform: capitalize;
+}
+.rm-calendar .fc .fc-daygrid-day-number {
+  margin: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  border-radius: 9999px;
+}
+.rm-calendar .fc .fc-day-today .fc-daygrid-day-number {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 600;
+}
+.rm-calendar .fc .fc-timegrid-slot-label-cushion,
+.rm-calendar .fc .fc-timegrid-axis-cushion {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.rm-calendar .fc .fc-event {
+  border: 0;
+  border-left: 3px solid var(--rm-event-accent, var(--primary));
+  border-radius: 6px;
+  background: var(--rm-event-bg, var(--secondary));
+  color: var(--foreground);
+  cursor: pointer;
+  box-shadow: none;
+}
+.rm-calendar .fc .fc-event:hover {
+  filter: brightness(0.97);
+}
+.rm-calendar .fc .fc-event:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.rm-calendar .fc .fc-event-main {
+  color: inherit;
+  padding: 2px 6px;
+}
+.rm-calendar .fc .fc-more-link {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--primary);
+}
+.rm-calendar .rm-event--pending {
+  --rm-event-accent: var(--warning);
+  --rm-event-bg: color-mix(in oklab, var(--warning) 12%, var(--card));
+}
+.rm-calendar .rm-event--approved {
+  --rm-event-accent: var(--success);
+  --rm-event-bg: color-mix(in oklab, var(--success) 12%, var(--card));
+}
+.rm-calendar .rm-event--completed {
+  --rm-event-accent: var(--muted-foreground);
+  --rm-event-bg: var(--muted);
 }

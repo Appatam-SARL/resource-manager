@@ -1,0 +1,1557 @@
+---
+description: Contexte métier, architecture et règles globales du projet Resource Manager
+alwaysApply: true
+---
+
+# RESOURCE MANAGER — RÈGLE GLOBALE DU PROJET
+
+## 1. IDENTITÉ DU PROJET
+
+Le projet s'appelle **Resource Manager**.
+
+Resource Manager est une application interne destinée à un **Groupe d'entreprises**.
+
+Le Groupe est composé de plusieurs entreprises juridiquement ou opérationnellement distinctes.
+
+Chaque entreprise peut être organisée en plusieurs directions, mais certaines entreprises du Groupe peuvent fonctionner sans direction.
+
+L'application doit donc gérer une structure organisationnelle flexible.
+
+La structure de référence est :
+
+GROUPE
+    ↓
+ENTREPRISE
+    ↓
+DIRECTION (OPTIONNELLE)
+    ↓
+UTILISATEUR
+
+La Direction est facultative.
+
+Une entreprise peut avoir :
+
+Entreprise A
+    ├── Direction Technique
+    ├── Direction Commerciale
+    └── Direction Financière
+
+ou :
+
+Entreprise B
+    └── Aucun niveau Direction
+
+Cette différence doit être prise en compte dans toute l'application.
+
+---
+
+# 2. IMPORTANT : CE N'EST PAS UN SAAS
+
+Resource Manager est une application interne destinée à un Groupe.
+
+Le concept de multi-tenant SaaS ne doit PAS être introduit.
+
+Ne pas créer par défaut :
+
+- Tenant ;
+- Organization comme tenant technique ;
+- Subscription ;
+- Billing ;
+- Plan SaaS ;
+- Workspace SaaS ;
+- Platform onboarding ;
+- paiement ;
+- facturation ;
+- gestion d'abonnement.
+
+Le Groupe est l'organisation racine de l'application.
+
+Les entreprises sont des entités organisationnelles internes au Groupe.
+
+Le système doit cependant être conçu de manière suffisamment propre pour isoler les données et les permissions entre les différentes entreprises.
+
+Cette isolation est une exigence métier et de sécurité, mais elle ne doit pas être implémentée comme une architecture SaaS multi-tenant.
+
+---
+
+# 3. STRUCTURE ORGANISATIONNELLE
+
+La hiérarchie métier principale est :
+
+Group
+    │
+    ├── Company
+    │       │
+    │       ├── Direction
+    │       │       │
+    │       │       └── User
+    │       │
+    │       └── User
+    │
+    ├── Company
+    │       └── User
+    │
+    └── Company
+            ├── Direction
+            └── User
+
+Règle fondamentale :
+
+Une Company appartient obligatoirement au Group.
+
+Une Direction appartient obligatoirement à une Company.
+
+Une Direction peut être absente.
+
+Un User appartient obligatoirement à une Company.
+
+Un User peut appartenir à une Direction.
+
+La relation User → Direction est donc optionnelle.
+
+---
+
+# 4. MODÈLE ORGANISATIONNEL
+
+Les principales entités organisationnelles sont :
+
+Group
+Company
+Direction
+User
+
+Relations :
+
+Group 1 ─── N Company
+
+Company 1 ─── N Direction
+
+Company 1 ─── N User
+
+Direction 1 ─── N User
+
+Mais :
+
+User → Direction = OPTIONAL
+
+Cela signifie qu'un utilisateur peut être rattaché directement à une entreprise sans direction.
+
+Exemple :
+
+User A
+Company = Appatam
+Direction = Direction Technique
+
+User B
+Company = Société B
+Direction = null
+
+Cette situation doit être parfaitement supportée par l'application.
+
+---
+
+# 5. RESSOURCES
+
+Les ressources principales de V1 sont :
+
+- véhicules ;
+- salles de réunion.
+
+Les ressources appartiennent à une entreprise.
+
+Exemple :
+
+Vehicle
+    → Company
+
+MeetingRoom
+    → Company
+
+Une entreprise possède donc ses propres ressources.
+
+Exemple :
+
+Appatam
+    ├── Véhicule 1
+    ├── Véhicule 2
+    ├── Salle A
+    └── Salle B
+
+Entreprise B
+    ├── Véhicule 3
+    └── Salle C
+
+Par défaut, une ressource appartient à une seule entreprise.
+
+Une entreprise ne doit pas pouvoir réserver directement la ressource d'une autre entreprise, sauf si une règle métier spécifique de partage inter-entreprises est explicitement ajoutée.
+
+### RÈGLE DE PARTAGE GROUPE (EXPLICITEMENT DÉCIDÉE) — VÉHICULES ET SALLES
+
+Les véhicules et salles de réunion sont partagés par tout le Groupe :
+
+- `companyId` de la ressource = **entreprise gestionnaire** : seule elle (ou un GROUP_ADMIN) crée, modifie, change le statut ou supprime la ressource ;
+- tout utilisateur actif d'une entreprise active du Groupe peut consulter et réserver une ressource `AVAILABLE` dont l'entreprise gestionnaire est active (`GET /vehicles|/rooms?scope=group`) ; le scope par défaut `managed` reste réservé à l'administration ;
+- `Reservation.companyId` = **entreprise du demandeur** : l'approbation, le rejet et la visibilité suivent la hiérarchie du demandeur (Company Admin / Manager de sa direction) ;
+- la disponibilité d'une ressource ne révèle jamais le demandeur ni l'objet d'une réservation d'une autre entreprise (uniquement le créneau occupé) ;
+- les autres types de ressources futurs ne sont PAS partagés implicitement.
+
+---
+
+# 6. RÉSERVATIONS
+
+Une réservation appartient à une ressource.
+
+La ressource appartient elle-même à une entreprise.
+
+Le demandeur de la réservation est un utilisateur appartenant à une entreprise.
+
+Le système doit vérifier les droits d'accès en fonction de la structure organisationnelle.
+
+Par défaut :
+
+User
+    ↓
+Company
+    ↓
+Resource
+
+L'utilisateur doit avoir le droit d'utiliser la ressource de son entreprise.
+
+Les réservations inter-entreprises ne doivent pas être autorisées par défaut.
+
+Si le Groupe décide ultérieurement qu'une ressource peut être partagée entre plusieurs entreprises, cette fonctionnalité devra être conçue explicitement avec une règle d'autorisation dédiée.
+
+Ne jamais ajouter implicitement cette possibilité.
+
+---
+
+# 7. OBJECTIF MÉTIER
+
+Resource Manager doit permettre au Groupe de centraliser la gestion des ressources de ses différentes entreprises.
+
+Les collaborateurs doivent pouvoir consulter les ressources auxquelles ils ont accès, vérifier leur disponibilité, effectuer une réservation et suivre le statut de leurs demandes.
+
+Les responsables doivent pouvoir gérer et valider les demandes relevant de leur périmètre organisationnel.
+
+Les administrateurs doivent pouvoir administrer les entreprises, directions, utilisateurs, ressources et réservations selon leur niveau d'autorisation.
+
+---
+
+# 8. ARCHITECTURE GÉNÉRALE
+
+Architecture globale :
+
+                    RESOURCE MANAGER
+                           │
+          ┌────────────────┼────────────────┐
+          │                │                │
+          ▼                ▼                ▼
+       WEB APP          ADMIN WEB       MOBILE APP
+       Next.js          Next.js        React Native
+          │                │                │
+          └────────────────┼────────────────┘
+                           │
+                         HTTPS
+                           │
+                           ▼
+                    NESTJS REST API
+                           │
+                  ┌────────┴─────────┐
+                  │                  │
+                  ▼                  ▼
+              PostgreSQL           Redis
+                  │
+                Prisma
+                  │
+                  ▼
+               Backups
+
+Architecture à respecter :
+
+- Monorepo ;
+- Modular Monolith ;
+- architecture orientée domaines ;
+- API REST centralisée ;
+- PostgreSQL ;
+- Prisma ;
+- Next.js ;
+- React Native + Expo ;
+- Docker ;
+- CI/CD.
+
+NE PAS créer de microservices sauf demande explicite.
+
+---
+
+# 9. MONOREPO
+
+Le projet doit utiliser :
+
+- pnpm ;
+- Turborepo.
+
+Structure :
+
+resource-manager/
+│
+├── apps/
+│   ├── web/
+│   ├── admin/
+│   ├── mobile/
+│   └── api/
+│
+├── packages/
+│   ├── ui/
+│   ├── types/
+│   ├── schemas/
+│   ├── api-client/
+│   ├── constants/
+│   ├── utils/
+│   └── config/
+│
+├── prisma/
+│   ├── schema.prisma
+│   ├── migrations/
+│   └── seed.ts
+│
+├── infrastructure/
+│   ├── docker/
+│   ├── nginx/
+│   ├── backup/
+│   ├── monitoring/
+│   └── scripts/
+│
+├── docs/
+│   ├── architecture/
+│   ├── api/
+│   ├── database/
+│   └── deployment/
+│
+├── .github/
+│   └── workflows/
+│
+├── package.json
+├── pnpm-workspace.yaml
+└── turbo.json
+
+---
+
+# 10. APPLICATIONS
+
+Le monorepo contient quatre applications principales.
+
+apps/web
+
+Application Web destinée aux collaborateurs.
+
+apps/admin
+
+Application Web destinée aux administrateurs et responsables.
+
+apps/mobile
+
+Application mobile destinée aux collaborateurs et éventuellement aux responsables.
+
+apps/api
+
+Backend central NestJS.
+
+Toutes les applications clientes communiquent avec NestJS.
+
+Web
+    ↓
+NestJS
+
+Admin
+    ↓
+NestJS
+
+Mobile
+    ↓
+NestJS
+
+Aucune application cliente ne doit accéder directement à PostgreSQL.
+
+---
+
+# 11. APPLICATION WEB
+
+Technologies :
+
+- Next.js ;
+- TypeScript ;
+- App Router ;
+- Tailwind CSS ;
+- shadcn/ui ;
+- Lucide React ;
+- TanStack Query ;
+- React Hook Form ;
+- Zod.
+
+L'application doit être responsive.
+
+Elle doit fonctionner correctement sur :
+
+- desktop ;
+- laptop ;
+- tablette ;
+- smartphone.
+
+Les interfaces doivent être pensées Mobile First lorsque cela est pertinent.
+
+---
+
+# 12. ADMIN WEB
+
+L'Admin Web permet de gérer les éléments du Groupe selon les droits de l'administrateur.
+
+Fonctionnalités principales :
+
+Gestion du Groupe.
+
+Gestion des entreprises.
+
+Gestion des directions.
+
+Gestion des utilisateurs.
+
+Gestion des véhicules.
+
+Gestion des salles.
+
+Gestion des réservations.
+
+Gestion du calendrier.
+
+Gestion des notifications.
+
+Consultation des audits.
+
+Gestion des paramètres.
+
+L'accès à ces fonctionnalités doit être contrôlé par les permissions.
+
+---
+
+# 13. APPLICATION MOBILE
+
+Technologies :
+
+- React Native ;
+- Expo ;
+- TypeScript ;
+- Expo Router ;
+- TanStack Query ;
+- React Hook Form ;
+- Zod.
+
+Fonctionnalités principales :
+
+- connexion ;
+- tableau de bord ;
+- consultation des ressources ;
+- disponibilité ;
+- création de réservation ;
+- consultation des réservations ;
+- détail d'une réservation ;
+- annulation ;
+- notifications ;
+- profil.
+
+Le mobile communique uniquement avec NestJS via HTTPS.
+
+---
+
+# 14. BACKEND
+
+Technologies :
+
+- NestJS ;
+- TypeScript ;
+- Prisma ;
+- PostgreSQL ;
+- REST ;
+- Swagger/OpenAPI.
+
+Architecture :
+
+**Modular Monolith**
+
+Modules :
+
+modules/
+├── auth/
+├── group/
+├── companies/
+├── directions/
+├── users/
+├── vehicles/
+├── rooms/
+├── reservations/
+├── notifications/
+├── dashboard/
+└── audit/
+
+---
+
+# 15. ARCHITECTURE PAR DOMAINES
+
+Chaque domaine doit être isolé.
+
+Exemple :
+
+companies/
+├── domain/
+├── application/
+├── infrastructure/
+└── presentation/
+
+directions/
+├── domain/
+├── application/
+├── infrastructure/
+└── presentation/
+
+reservations/
+├── domain/
+├── application/
+├── infrastructure/
+└── presentation/
+
+La structure peut être simplifiée lorsqu'un domaine est petit.
+
+Éviter le sur-engineering.
+
+---
+
+# 16. MODÈLE DE DONNÉES PRINCIPAL
+
+Le modèle doit au minimum prévoir :
+
+Group
+
+Company
+
+Direction
+
+User
+
+Vehicle
+
+MeetingRoom
+
+Reservation
+
+Notification
+
+AuditLog
+
+Relations principales :
+
+Group
+    └── Company
+            ├── Direction
+            │       └── User
+            │
+            ├── User
+            │
+            ├── Vehicle
+            │
+            └── MeetingRoom
+
+Reservation
+    ├── User
+    └── Resource
+
+La ressource peut être modélisée selon le choix architectural retenu, mais le modèle doit permettre de gérer proprement les véhicules et les salles.
+
+---
+
+# 17. USER
+
+Un utilisateur doit notamment pouvoir être associé à :
+
+- une entreprise ;
+- éventuellement une direction ;
+- un rôle ;
+- un statut actif/inactif.
+
+Conceptuellement :
+
+User {
+    companyId
+    directionId?
+    role
+    status
+}
+
+Le champ directionId doit être nullable.
+
+Il est interdit de supposer qu'un utilisateur possède obligatoirement une direction.
+
+---
+
+# 18. COMPANY
+
+Une entreprise possède notamment :
+
+- un nom ;
+- un code éventuel ;
+- un statut ;
+- une description éventuelle ;
+- une liste d'utilisateurs ;
+- une liste de directions ;
+- une liste de véhicules ;
+- une liste de salles.
+
+Une entreprise inactive ne doit plus permettre la création de nouvelles réservations.
+
+Les données historiques doivent rester consultables selon les permissions.
+
+---
+
+# 19. DIRECTION
+
+Une Direction appartient à une entreprise.
+
+Elle doit notamment posséder :
+
+- un nom ;
+- un code éventuel ;
+- un statut ;
+- une description éventuelle ;
+- une entreprise de rattachement.
+
+Une direction n'est pas obligatoire pour une entreprise.
+
+Une entreprise peut donc avoir zéro, une ou plusieurs directions.
+
+---
+
+# 20. RÔLES ET PÉRIMÈTRES
+
+Les rôles doivent tenir compte de la structure Groupe → Entreprise → Direction.
+
+Rôles de référence :
+
+GROUP_ADMIN
+COMPANY_ADMIN
+MANAGER
+EMPLOYEE
+
+Selon les besoins réels, un rôle SYSTEM_ADMIN peut également être prévu pour l'administration technique.
+
+### GROUP_ADMIN
+
+Le Group Admin possède une vision globale du Groupe.
+
+Il peut consulter et administrer les entreprises du Groupe.
+
+Il peut gérer les directions, utilisateurs et ressources selon les règles définies.
+
+Il peut consulter les réservations de l'ensemble du Groupe.
+
+### COMPANY_ADMIN
+
+Le Company Admin administre principalement son entreprise.
+
+Il peut gérer les utilisateurs, directions, ressources et réservations de son entreprise selon ses permissions.
+
+Il ne doit pas pouvoir modifier les données d'une autre entreprise.
+
+### MANAGER
+
+Le Manager gère les demandes relevant de son périmètre.
+
+Son périmètre peut être :
+
+- une direction ;
+- ou directement une entreprise lorsque celle-ci ne possède pas de direction.
+
+IMPORTANT :
+
+Ne jamais supposer qu'un Manager appartient obligatoirement à une Direction.
+
+### EMPLOYEE
+
+L'Employee peut consulter les ressources auxquelles il a accès et créer ses propres réservations.
+
+---
+
+# 21. AUTORISATION
+
+L'autorisation doit être basée sur :
+
+1. le rôle ;
+2. l'entreprise ;
+3. éventuellement la direction ;
+4. le type de ressource ;
+5. le contexte de la réservation.
+
+Le backend doit toujours vérifier le périmètre de l'utilisateur.
+
+Exemple :
+
+Un utilisateur de l'Entreprise A ne doit pas pouvoir modifier un véhicule de l'Entreprise B simplement en connaissant son ID.
+
+Le backend doit vérifier :
+
+user.companyId === resource.companyId
+
+lorsque la règle métier impose cette restriction.
+
+---
+
+# 22. PÉRIMÈTRE DES MANAGERS
+
+Le système doit supporter deux situations.
+
+Situation 1 :
+
+Entreprise avec directions.
+
+Exemple :
+
+Entreprise A
+    ├── Direction Technique
+    └── Direction Commerciale
+
+Un Manager de la Direction Technique peut gérer les demandes relevant de cette direction selon les règles métier.
+
+Situation 2 :
+
+Entreprise sans directions.
+
+Exemple :
+
+Entreprise B
+    └── aucun niveau Direction
+
+Le Manager est alors rattaché directement à l'entreprise.
+
+Son périmètre est l'entreprise.
+
+Le code ne doit jamais contenir une logique du type :
+
+if (!user.directionId) {
+    throw error
+}
+
+sans justification métier.
+
+L'absence de direction est une situation normale.
+
+---
+
+# 23. RÉSERVATION
+
+La réservation est le cœur métier.
+
+Une réservation doit respecter :
+
+startAt < endAt
+
+Une réservation ne doit pas chevaucher une autre réservation active pour la même ressource.
+
+Règle :
+
+newStart < existingEnd
+AND
+newEnd > existingStart
+
+Les réservations :
+
+CANCELLED
+
+et
+
+REJECTED
+
+ne doivent plus bloquer la ressource.
+
+Les réservations :
+
+PENDING
+
+et
+
+APPROVED
+
+doivent être traitées selon les règles métier définies pour la disponibilité.
+
+---
+
+# 24. RÉSERVATION VÉHICULE
+
+Le collaborateur renseigne :
+
+- véhicule ;
+- date de départ ;
+- heure de départ ;
+- date de retour ;
+- heure de retour ;
+- destination ;
+- motif de la mission ;
+- nombre de passagers ;
+- commentaire.
+
+Le système vérifie :
+
+- l'appartenance du véhicule à l'entreprise ;
+- le statut du véhicule ;
+- la disponibilité ;
+- les conflits ;
+- les horaires ;
+- la capacité.
+
+Le nombre de passagers doit être inférieur ou égal au nombre de places du véhicule.
+
+---
+
+# 25. RÉSERVATION SALLE
+
+Le collaborateur renseigne :
+
+- salle ;
+- date ;
+- heure de début ;
+- heure de fin ;
+- objet ;
+- nombre de participants ;
+- commentaire.
+
+Le système vérifie :
+
+- l'appartenance de la salle à l'entreprise ;
+- le statut ;
+- la disponibilité ;
+- la capacité ;
+- les horaires ;
+- les conflits.
+
+Le nombre de participants doit être inférieur ou égal à la capacité de la salle.
+
+---
+
+# 26. STATUTS DES RESSOURCES
+
+Les ressources peuvent avoir :
+
+AVAILABLE
+MAINTENANCE
+OUT_OF_SERVICE
+
+Une ressource en maintenance ou hors service ne peut pas recevoir de nouvelle réservation.
+
+---
+
+# 27. STATUTS DES RÉSERVATIONS
+
+Les réservations utilisent :
+
+PENDING
+APPROVED
+REJECTED
+CANCELLED
+COMPLETED
+
+Un rejet nécessite obligatoirement un motif.
+
+Une réservation ne doit jamais être supprimée physiquement lorsque son historique est important.
+
+Privilégier la conservation historique.
+
+---
+
+# 28. RÈGLES D'INTÉGRITÉ ORGANISATIONNELLE
+
+Toujours vérifier les relations organisationnelles.
+
+Exemple :
+
+User
+    ↓
+Company A
+
+Resource
+    ↓
+Company B
+
+Le système doit refuser l'opération si la politique ne permet pas le partage inter-entreprises.
+
+Autre exemple :
+
+User
+    ↓
+Company A
+    ↓
+Direction Technique
+
+Le User ne doit pas pouvoir modifier les données de :
+
+Company B
+
+ou :
+
+Direction Commerciale
+
+sans permission appropriée.
+
+---
+
+# 29. API
+
+Version :
+
+/api/v1
+
+Exemples :
+
+GET /api/v1/group
+
+GET /api/v1/companies
+
+POST /api/v1/companies
+
+GET /api/v1/companies/:id
+
+GET /api/v1/directions
+
+POST /api/v1/directions
+
+GET /api/v1/users
+
+GET /api/v1/vehicles
+
+GET /api/v1/rooms
+
+GET /api/v1/reservations
+
+POST /api/v1/reservations
+
+POST /api/v1/reservations/:id/approve
+
+POST /api/v1/reservations/:id/reject
+
+POST /api/v1/reservations/:id/cancel
+
+Documenter avec Swagger/OpenAPI.
+
+---
+
+# 30. VALIDATION
+
+Frontend :
+
+React Hook Form + Zod.
+
+Backend :
+
+DTO + class-validator ou équivalent.
+
+Les données provenant du client sont toujours considérées comme non fiables.
+
+La validation métier doit être effectuée côté backend.
+
+---
+
+# 31. SÉCURITÉ
+
+Utiliser :
+
+- HTTPS ;
+- authentification sécurisée ;
+- hashage sécurisé des mots de passe ;
+- RBAC ;
+- contrôle du périmètre entreprise ;
+- contrôle du périmètre direction ;
+- validation serveur ;
+- CORS ;
+- Helmet ;
+- rate limiting ;
+- audit logs ;
+- variables d'environnement ;
+- secrets sécurisés ;
+- backups.
+
+La sécurité ne doit jamais dépendre uniquement du frontend.
+
+---
+
+# 32. FRONTEND
+
+Utiliser une architecture orientée fonctionnalités.
+
+features/
+├── auth/
+├── dashboard/
+├── companies/
+├── directions/
+├── users/
+├── vehicles/
+├── rooms/
+├── reservations/
+└── notifications/
+
+Les composants génériques doivent être placés dans :
+
+packages/ui
+
+Les appels API doivent être centralisés.
+
+TanStack Query doit être utilisé pour les données serveur.
+
+---
+
+# 33. UI / UX
+
+L'interface doit être :
+
+- moderne ;
+- professionnelle ;
+- simple ;
+- responsive ;
+- accessible ;
+- cohérente.
+
+Prévoir :
+
+- desktop ;
+- tablette ;
+- mobile.
+
+Les interfaces doivent clairement afficher le contexte organisationnel lorsque cela est nécessaire.
+
+Exemple :
+
+Entreprise :
+APPATAM
+
+Direction :
+Direction Technique
+
+Utilisateur :
+Koné Nonwa
+
+Lorsqu'une entreprise n'a pas de direction, ne pas afficher un champ Direction comme obligatoire.
+
+---
+
+# 34. CONTEXTE ORGANISATIONNEL DANS L'INTERFACE
+
+L'utilisateur doit comprendre dans quel périmètre il travaille.
+
+Selon son rôle, l'interface peut afficher :
+
+Groupe
+→ Entreprise
+→ Direction
+
+Mais la Direction doit être masquée ou indiquée comme inexistante lorsqu'elle n'est pas définie.
+
+Les formulaires doivent être dynamiques.
+
+Exemple :
+
+Sélection Entreprise
+    ↓
+Si l'entreprise possède des directions
+    ↓
+Afficher Direction
+
+Sinon :
+
+Sélection Entreprise
+    ↓
+Aucune Direction
+
+Ne jamais forcer artificiellement la création d'une direction.
+
+---
+
+# 35. TABLEAUX ET FILTRES
+
+Les interfaces d'administration doivent permettre de filtrer les données selon le périmètre disponible.
+
+Exemples :
+
+Groupe
+Entreprise
+Direction
+Statut
+Utilisateur
+Ressource
+Période
+
+Un Group Admin peut avoir une vision Groupe.
+
+Un Company Admin peut avoir une vision de son entreprise.
+
+Un Manager peut avoir une vision de son périmètre.
+
+Un Employee peut principalement consulter ses propres données.
+
+Les filtres doivent respecter les permissions du backend.
+
+---
+
+# 36. DASHBOARD
+
+Le dashboard doit être adapté au rôle.
+
+Group Admin :
+
+Vue globale du Groupe.
+
+Company Admin :
+
+Vue de son entreprise.
+
+Manager :
+
+Vue de son périmètre.
+
+Employee :
+
+Vue personnelle.
+
+Les statistiques ne doivent jamais exposer des données auxquelles l'utilisateur n'a pas accès.
+
+---
+
+# 37. NOTIFICATIONS
+
+Le système doit prévoir les notifications internes liées notamment aux réservations.
+
+Exemples :
+
+Création d'une réservation.
+
+Approbation.
+
+Rejet.
+
+Annulation.
+
+Modification.
+
+Les notifications doivent respecter le périmètre organisationnel.
+
+Un utilisateur d'une entreprise ne doit pas recevoir par défaut les notifications privées d'une autre entreprise.
+
+---
+
+# 38. AUDIT
+
+Les opérations sensibles doivent être enregistrées.
+
+Exemples :
+
+Création d'utilisateur.
+
+Modification d'utilisateur.
+
+Modification d'entreprise.
+
+Modification de direction.
+
+Création de véhicule.
+
+Modification de véhicule.
+
+Création de salle.
+
+Création de réservation.
+
+Approbation.
+
+Rejet.
+
+Annulation.
+
+L'audit doit permettre de connaître :
+
+- qui ;
+- quoi ;
+- quand ;
+- sur quelle ressource ;
+- ancienne valeur lorsque nécessaire ;
+- nouvelle valeur lorsque nécessaire.
+
+---
+
+# 39. BASE DE DONNÉES
+
+PostgreSQL est la base principale.
+
+Prisma est l'ORM.
+
+Les migrations Prisma sont obligatoires.
+
+Ne pas modifier directement le schéma de production.
+
+Toute modification du modèle de données doit passer par une migration.
+
+Le modèle doit préserver les relations :
+
+Group → Company
+
+Company → Direction
+
+Company → User
+
+Direction → User
+
+Company → Vehicle
+
+Company → MeetingRoom
+
+User → Reservation
+
+Resource → Reservation
+
+---
+
+# 40. INDEXATION
+
+Prévoir des index adaptés aux recherches fréquentes.
+
+Notamment :
+
+companyId
+
+directionId
+
+userId
+
+status
+
+startAt
+
+endAt
+
+resourceId
+
+createdAt
+
+Les index doivent être ajoutés selon les besoins réels des requêtes.
+
+Ne pas ajouter des dizaines d'index inutilement.
+
+---
+
+# 41. PERFORMANCE
+
+Privilégier :
+
+- pagination ;
+- filtrage côté serveur ;
+- recherche côté serveur ;
+- sélection ciblée des champs ;
+- index PostgreSQL ;
+- cache lorsque nécessaire ;
+- TanStack Query ;
+- lazy loading ;
+- code splitting.
+
+Ne pas charger toute la base de données dans le frontend.
+
+---
+
+# 42. INFRASTRUCTURE
+
+Utiliser Docker pour les environnements de développement et selon les besoins pour staging/production.
+
+Services possibles :
+
+web
+admin
+api
+postgres
+redis
+nginx
+
+Prévoir :
+
+development
+staging
+production
+
+---
+
+# 43. CI/CD
+
+Utiliser GitHub Actions.
+
+Pipeline :
+
+Lint
+↓
+Typecheck
+↓
+Tests
+↓
+Build
+↓
+Docker Build
+↓
+Deploy Staging
+↓
+Validation
+↓
+Deploy Production
+
+Une modification ne doit pas être considérée comme terminée si elle casse le build ou les tests.
+
+---
+
+# 44. TESTS
+
+Tester particulièrement les règles organisationnelles.
+
+Exemples :
+
+Un utilisateur de l'entreprise A ne peut pas modifier les ressources de l'entreprise B.
+
+Un Company Admin de l'entreprise A ne peut pas administrer l'entreprise B.
+
+Un Manager d'une direction ne peut pas administrer une autre direction sans permission.
+
+Un Manager d'une entreprise sans direction doit pouvoir fonctionner correctement.
+
+Un utilisateur sans direction doit pouvoir utiliser normalement l'application.
+
+Un véhicule d'une autre entreprise ne doit pas être réservable par défaut.
+
+Une salle d'une autre entreprise ne doit pas être réservable par défaut.
+
+Tester également :
+
+- authentification ;
+- RBAC ;
+- réservation ;
+- conflits ;
+- capacité ;
+- annulation ;
+- approbation ;
+- rejet ;
+- notifications ;
+- audit.
+
+---
+
+# 45. CONVENTIONS DE CODE
+
+Utiliser TypeScript strict.
+
+Éviter any.
+
+Utiliser des types explicites.
+
+Utiliser des noms explicites.
+
+Exemples :
+
+getCompanyById()
+
+getDirectionById()
+
+getUserCompany()
+
+getAvailableVehicles()
+
+createReservation()
+
+approveReservation()
+
+rejectReservation()
+
+Éviter :
+
+getData()
+
+handle()
+
+process()
+
+Les fonctions doivent avoir une responsabilité claire.
+
+---
+
+# 46. LANGUE
+
+L'interface utilisateur doit être en français.
+
+Le code doit être en anglais.
+
+Exemple :
+
+Code :
+
+Company
+Direction
+Reservation
+Vehicle
+MeetingRoom
+
+Interface :
+
+Entreprise
+Direction
+Réservation
+Véhicule
+Salle de réunion
+
+Les messages doivent être professionnels et compréhensibles.
+
+---
+
+# 47. APPROCHE DE DÉVELOPPEMENT
+
+Avant toute modification importante :
+
+1. analyser le code existant ;
+2. rechercher les fichiers concernés ;
+3. comprendre les dépendances ;
+4. identifier les impacts ;
+5. vérifier les règles métier ;
+6. proposer une approche ;
+7. implémenter ;
+8. lancer les tests ;
+9. vérifier le build.
+
+Ne jamais réécrire massivement une fonctionnalité existante sans justification.
+
+Ne jamais supprimer une fonctionnalité existante pour résoudre un problème sans analyser ses dépendances.
+
+---
+
+# 48. PRINCIPES D'ARCHITECTURE
+
+Privilégier :
+
+DRY
+
+SOLID
+
+KISS
+
+Separation of Concerns
+
+Single Responsibility
+
+Type Safety
+
+Security by Design
+
+Domain Driven Design pragmatique
+
+Clean Architecture pragmatique
+
+Ne pas appliquer ces principes de manière dogmatique.
+
+Le code doit rester simple.
+
+Éviter le sur-engineering.
+
+---
+
+# 49. PRIORITÉS
+
+Lorsqu'il faut choisir entre plusieurs solutions :
+
+1. Exactitude métier
+2. Sécurité
+3. Intégrité des données
+4. Respect des périmètres organisationnels
+5. Maintenabilité
+6. Expérience utilisateur
+7. Performance
+8. Évolutivité
+9. Optimisation
+
+La sécurité et les règles d'accès Groupe/Entreprise/Direction sont prioritaires.
+
+---
+
+# 50. ÉVOLUTION FUTURE
+
+L'architecture doit permettre d'ajouter ultérieurement :
+
+- gestion avancée de flotte ;
+- maintenance ;
+- kilométrage ;
+- carburant ;
+- conducteurs ;
+- documents ;
+- notifications push ;
+- email ;
+- calendrier externe ;
+- autres types de ressources ;
+- statistiques avancées ;
+- exports ;
+- réservation récurrente.
+
+Mais ces fonctionnalités ne doivent pas être introduites dans la V1 sans demande explicite.
+
+---
+
+# 51. RÈGLE FONDAMENTALE POUR LES FUTURS PROMPTS
+
+Pour chaque nouveau prompt concernant Resource Manager, considérer automatiquement cette règle comme le contexte architectural et métier permanent.
+
+Toujours respecter la hiérarchie :
+
+GROUP
+    ↓
+COMPANY
+    ↓
+DIRECTION (OPTIONNELLE)
+    ↓
+USER
+
+Ne jamais supposer qu'une entreprise possède obligatoirement une Direction.
+
+Ne jamais supposer qu'un utilisateur appartient obligatoirement à une Direction.
+
+Ne jamais traiter les entreprises comme des tenants SaaS.
+
+Ne jamais permettre par défaut le partage de ressources entre entreprises (exception explicite : véhicules et salles partagés par le Groupe, voir section 5).
+
+Ne jamais permettre à un utilisateur d'accéder aux données d'une autre entreprise sans permission explicite.
+
+Toujours appliquer les contrôles de périmètre côté backend.
+
+Le frontend ne constitue jamais une barrière de sécurité.
+
+Toutes les applications clientes utilisent l'API NestJS.
+
+Aucune application cliente ne se connecte directement à PostgreSQL.
+
+Le backend NestJS constitue la source de vérité pour :
+
+- authentification ;
+- autorisation ;
+- règles métier ;
+- disponibilité ;
+- réservation ;
+- conflits ;
+- capacité ;
+- périmètres organisationnels ;
+- audit.
+
+Avant toute nouvelle fonctionnalité, vérifier son impact sur :
+
+Group
+Company
+Direction
+User
+Resource
+Reservation
+Permissions
+
+Si une demande entre en contradiction avec cette architecture, signaler la contradiction et proposer une solution compatible.
+
+Ne jamais introduire de microservices, de multi-tenancy SaaS ou de nouvelle architecture majeure sans demande explicite.
+
+Toujours privilégier une solution moderne, robuste, simple et adaptée à une application interne de Groupe.

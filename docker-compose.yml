@@ -1,0 +1,106 @@
+# Local development stack (production-like images, local-only exposure).
+#   cp .env.docker.example .env.docker
+#   docker compose up -d --build
+#   → http://localhost:8088
+# Staging / preprod / production use their own files under infrastructure/docker/compose/.
+
+name: resource-manager-local
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: .env.docker
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # "db-host" exists only to publish the port on the loopback (Prisma Studio / seed from the host).
+    networks: [internal, db-host]
+    ports:
+      - '127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+
+  migrate:
+    image: resource-manager-api:local
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      args:
+        GIT_COMMIT_SHA: ${GIT_COMMIT_SHA:-local}
+    env_file: .env.docker
+    command: ['./node_modules/.bin/prisma', 'migrate', 'deploy', '--schema=/app/prisma/schema.prisma']
+    healthcheck:
+      disable: true
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+    logging: *default-logging
+
+  api:
+    image: resource-manager-api:local
+    restart: unless-stopped
+    env_file: .env.docker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [internal, proxy]
+    logging: *default-logging
+
+  admin:
+    image: resource-manager-admin:local
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+      args:
+        GIT_COMMIT_SHA: ${GIT_COMMIT_SHA:-local}
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${ADMIN_APP_ENV:-development}
+      # Empty → same origin: Caddy forwards /api and /socket.io to the API.
+      API_PUBLIC_URL: ''
+    networks: [proxy]
+    logging: *default-logging
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:${LOCAL_HTTP_PORT:-8088}:80'
+    volumes:
+      - ./infrastructure/caddy/Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - ./infrastructure/caddy/snippets:/etc/caddy/snippets:ro
+      - caddy-data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+      admin:
+        condition: service_healthy
+    networks: [proxy]
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1/api/v1/health']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *default-logging
+
+networks:
+  proxy:
+  internal:
+    internal: true
+  db-host:
+
+volumes:
+  postgres-data:
+  caddy-data:

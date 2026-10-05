@@ -3,12 +3,11 @@
   "compilerOptions": {
     "strict": true,
     "paths": {
-      "@/*": [
-        "./src/*"
-      ],
-      "@/assets/*": [
-        "./assets/*"
-      ]
+      "@/*": ["./src/*"],
+      "@/assets/*": ["./assets/*"],
+      "@resource-manager/types": ["../../packages/types/src/index.ts"],
+      "@resource-manager/api-client": ["../../packages/api-client/src/index.ts"],
+      "@resource-manager/schemas": ["../../packages/schemas/src/index.ts"]
     }
   },
   "include": [
