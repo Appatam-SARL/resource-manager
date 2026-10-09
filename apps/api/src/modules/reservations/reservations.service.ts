@@ -1116,6 +1116,7 @@ export class ReservationsService {
    * Serializes "conflict check + write" per resource with a transaction-scoped
    * PostgreSQL advisory lock: two concurrent requests on the same resource cannot
    * both pass the conflict check. The lock is released at commit or rollback.
+   * `hashtext` (not `hashtextextended`) keeps compatibility with PostgreSQL < 11 on the cPanel host.
    */
   private async withResourceLock<T>(
     target: {
@@ -1131,7 +1132,7 @@ export class ReservationsService {
         : target.roomId;
     const lockKey = `reservation:${target.resourceType}:${resourceId ?? ''}`;
     return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
       return work(tx);
     });
   }
