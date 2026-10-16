@@ -13,6 +13,14 @@ describe('rbac', () => {
     expect(canAccessRoute('EMPLOYEE', '/group')).toBe(false);
   });
 
+  it('réserve le catalogue des équipements aux GROUP_ADMIN', () => {
+    expect(canAccessRoute('GROUP_ADMIN', '/equipments')).toBe(true);
+    expect(canAccessRoute('GROUP_ADMIN', '/equipments/new')).toBe(true);
+    expect(canAccessRoute('COMPANY_ADMIN', '/equipments')).toBe(false);
+    expect(canAccessRoute('MANAGER', '/equipments/abc')).toBe(false);
+    expect(visibleMenuItems('COMPANY_ADMIN').map((i) => i.href)).not.toContain('/equipments');
+  });
+
   it('autorise /403 pour tous', () => {
     expect(canAccessRoute('EMPLOYEE', '/403')).toBe(true);
   });

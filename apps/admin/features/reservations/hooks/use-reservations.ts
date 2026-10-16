@@ -113,6 +113,8 @@ export function useCancelReservation() {
       toast.success('Réservation annulée');
     },
     onError: (error: unknown) => {
+      // The reservation may have started meanwhile: refresh so the action disappears.
+      void queryClient.invalidateQueries({ queryKey: ['reservations'] });
       toast.error(
         error instanceof ApiError
           ? error.message

@@ -1,7 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown, ReduceMotion, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Check, Clock } from 'lucide-react-native';
+import { Check, Clock, Package } from 'lucide-react-native';
 import type { ReservationStatus } from '@resource-manager/types';
 import { Button } from '@/components/ui/Button';
 import { colors, radius, spacing } from '@/constants/theme';
@@ -10,6 +10,8 @@ type ReservationSuccessProps = {
   status: ReservationStatus;
   resourceName: string;
   scheduleLabel: string;
+  /** "Vidéoprojecteur × 1" lines returned by the API; empty when none was requested. */
+  equipmentLines?: string[];
   onViewReservation: () => void;
   onBackToList: () => void;
 };
@@ -29,6 +31,7 @@ export function ReservationSuccess({
   status,
   resourceName,
   scheduleLabel,
+  equipmentLines = [],
   onViewReservation,
   onBackToList,
 }: ReservationSuccessProps) {
@@ -59,6 +62,12 @@ export function ReservationSuccess({
         >
           <Text style={styles.recapTitle}>{resourceName}</Text>
           <Text style={styles.recapSchedule}>{scheduleLabel}</Text>
+          {equipmentLines.length > 0 ? (
+            <View style={styles.equipments}>
+              <Package size={14} color={colors.textMuted} />
+              <Text style={styles.recapSchedule}>{equipmentLines.join(' · ')}</Text>
+            </View>
+          ) : null}
           {status === 'PENDING' ? (
             <View style={styles.pending}>
               <Clock size={14} color={colors.warning} />
@@ -132,6 +141,13 @@ const styles = StyleSheet.create({
   recapSchedule: {
     fontSize: 14,
     color: colors.textMuted,
+  },
+  equipments: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 6,
   },
   pending: {
     flexDirection: 'row',

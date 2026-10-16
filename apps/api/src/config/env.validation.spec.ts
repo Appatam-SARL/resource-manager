@@ -34,4 +34,36 @@ describe('validateEnv', () => {
       /TRUST_PROXY_HOPS/,
     );
   });
+
+  describe('SMTP', () => {
+    const smtpEnv = {
+      SMTP_HOST: 'mail.example.test',
+      SMTP_PORT: '465',
+      SMTP_SECURE: 'true',
+      SMTP_USER: 'no-reply@example.test',
+      SMTP_PASSWORD: 'secret',
+      MAIL_FROM: 'Resource Manager <no-reply@example.test>',
+    };
+
+    it('is optional outside production', () => {
+      expect(() => validateEnv({ ...baseEnv, APP_ENV: 'preprod' })).not.toThrow();
+    });
+
+    it('is required in production', () => {
+      expect(() => validateEnv({ ...baseEnv, APP_ENV: 'production' })).toThrow(
+        /SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, MAIL_FROM required/,
+      );
+    });
+
+    it('accepts a complete production SMTP configuration', () => {
+      const env = validateEnv({ ...baseEnv, ...smtpEnv, APP_ENV: 'production' });
+
+      expect(env.SMTP_PORT).toBe(465);
+      expect(env.SMTP_SECURE).toBe('true');
+    });
+
+    it('rejects a non-boolean SMTP_SECURE', () => {
+      expect(() => validateEnv({ ...baseEnv, ...smtpEnv, SMTP_SECURE: 'yes' })).toThrow();
+    });
+  });
 });

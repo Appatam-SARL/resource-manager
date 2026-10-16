@@ -80,6 +80,24 @@ describe('RoomsService — realtime', () => {
     expect(realtime.publishResourceDeleted).toHaveBeenCalledWith(ResourceType.ROOM, storedRoom);
   });
 
+  it('stores normalized fixed equipment', async () => {
+    await service.create(
+      {
+        companyId: companies.appatam.id,
+        name: 'Salle A',
+        capacity: 10,
+        fixedEquipment: [' Écran mural ', 'écran mural', 'Visio intégrée'],
+      },
+      actors.companyAdminA,
+    );
+
+    expect(prisma.meetingRoom.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ fixedEquipment: ['Écran mural', 'Visio intégrée'] }),
+      }),
+    );
+  });
+
   it('publishes nothing for an admin of another company', async () => {
     const otherCompanyAdmin = { ...actors.companyAdminA, id: 'admin-b', companyId: companies.entrepriseB.id };
 

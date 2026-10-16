@@ -11,11 +11,14 @@ import type {
   AuthUser,
   CalendarEvent,
   DashboardSummary,
+  EquipmentAvailability,
   ListQueryParams,
   MeetingRoom,
   Notification,
   Paginated,
   Reservation,
+  ReservationEquipmentInput,
+  ResourceType,
   Vehicle,
 } from '@resource-manager/types';
 import {
@@ -180,6 +183,12 @@ async function patch<T>(path: string, body?: unknown): Promise<T> {
   return response.data;
 }
 
+async function put<T>(path: string, body?: unknown): Promise<T> {
+  const api = getApiClient();
+  const response = await api.put<T>(path, body);
+  return response.data;
+}
+
 async function del<T>(path: string, timeout?: number): Promise<T> {
   const api = getApiClient();
   const response = await api.delete<T>(path, timeout ? { timeout } : undefined);
@@ -194,6 +203,10 @@ export const authApi = {
   logout: (body: { refreshToken: string }) =>
     post<{ message: string }>('/auth/logout', body),
   me: () => get<AuthUser>('/auth/me'),
+  forgotPassword: (body: { email: string }) =>
+    post<{ message: string }>('/auth/forgot-password', body),
+  resetPassword: (body: { email: string; code: string; newPassword: string }) =>
+    post<{ message: string }>('/auth/reset-password', body),
 };
 
 export const dashboardApi = {
@@ -233,6 +246,8 @@ export const reservationsApi = {
   cancel: (id: string) => post<Reservation>(`/reservations/${id}/cancel`),
   extend: (id: string, newEndAt: string) =>
     post<Reservation>(`/reservations/${id}/extend`, { newEndAt }),
+  replaceEquipments: (id: string, equipments: ReservationEquipmentInput[]) =>
+    put<Reservation>(`/reservations/${id}/equipments`, { equipments }),
   checkAvailability: (
     params: {
       resourceType: string;
@@ -246,6 +261,18 @@ export const reservationsApi = {
       available: boolean;
       conflicts: { id: string; status: string; startAt: string; endAt: string }[];
     }>('/reservations/availability', params, signal),
+};
+
+export type EquipmentAvailabilityParams = {
+  resourceType: ResourceType;
+  startAt: string;
+  endAt: string;
+  excludeReservationId?: string;
+};
+
+export const equipmentsApi = {
+  availability: (params: EquipmentAvailabilityParams, signal?: AbortSignal) =>
+    get<EquipmentAvailability[]>('/equipments/availability', params, signal),
 };
 
 export const calendarApi = {

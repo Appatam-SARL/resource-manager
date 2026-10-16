@@ -94,7 +94,7 @@ export default function CalendarScreen() {
   };
 
   const isLoaded = query.data !== undefined && !query.isPlaceholderData;
-  const events = isLoaded ? applyCalendarFilters(query.data ?? [], filters) : [];
+  const events = isLoaded ? applyCalendarFilters(query.data ?? [], filters, now) : [];
   const counts = isLoaded ? countEventsByDay(events, getMonthGrid(selectedDate).flat()) : null;
   const rows = isLoaded ? buildDayAgenda(events, selectedDate, now) : [];
   const dayTitle = formatAgendaDayTitle(selectedDate, now);
@@ -129,7 +129,7 @@ export default function CalendarScreen() {
     <Screen padded={false}>
       <AppHeader
         title="Calendrier"
-        subtitle="Votre planning de réservations"
+        subtitle="Occupation Groupe — détail selon votre périmètre"
         right={<HeaderActionsWithAdd />}
       />
 

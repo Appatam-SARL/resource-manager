@@ -91,12 +91,15 @@ export function buildHomeOverview(
     .filter((reservation) => reservation.id !== highlight?.item.id)
     .sort((a, b) => parseApiDate(b.updatedAt).getTime() - parseApiDate(a.updatedAt).getTime())
     .slice(0, activityLimit)
-    .map((reservation) => ({
-      id: reservation.id,
-      item: toReservationListItem(reservation, now, currentUserId),
-      statusLabel: ACTIVITY_LABELS[reservation.status],
-      updatedLabel: formatRelativeDateTime(reservation.updatedAt, now),
-    }));
+    .map((reservation) => {
+      const item = toReservationListItem(reservation, now, currentUserId);
+      return {
+        id: reservation.id,
+        item,
+        statusLabel: ACTIVITY_LABELS[item.displayStatus],
+        updatedLabel: formatRelativeDateTime(reservation.updatedAt, now),
+      };
+    });
 
   return {
     highlight,

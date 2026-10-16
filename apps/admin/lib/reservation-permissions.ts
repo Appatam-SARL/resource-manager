@@ -20,14 +20,19 @@ export function canApproveOrReject(
   return false;
 }
 
+/** UI hint only: the API refuses cancellation once the start time is reached, for every role. */
 export function canCancelReservation(
   user: AuthUser,
   reservation: Reservation,
+  now: Date = new Date(),
 ): boolean {
   if (
     reservation.status !== 'PENDING' &&
     reservation.status !== 'APPROVED'
   ) {
+    return false;
+  }
+  if (new Date(reservation.startAt) <= now) {
     return false;
   }
   if (user.role === 'GROUP_ADMIN' || user.role === 'COMPANY_ADMIN') {

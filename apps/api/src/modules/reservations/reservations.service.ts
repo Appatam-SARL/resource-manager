@@ -24,6 +24,10 @@ import { toPlainJson } from '../../common/utils/to-plain-json.js';
 import { PrismaService } from '../../database/prisma.service.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { AuditService } from '../audit/audit.service.js';
+import {
+  EquipmentAvailabilityService,
+  type RequestedEquipment,
+} from '../equipments/equipment-availability.service.js';
 import { reservationNotificationMessages } from '../notifications/notification-messages.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { REALTIME_EVENTS } from '../realtime/realtime.constants.js';
@@ -34,6 +38,7 @@ import { CreateReservationDto } from './dto/create-reservation.dto.js';
 import type { ExtendReservationDto } from './dto/extend-reservation.dto.js';
 import { ListReservationsQueryDto } from './dto/list-reservations-query.dto.js';
 import { RejectReservationDto } from './dto/reject-reservation.dto.js';
+import type { ReplaceReservationEquipmentsDto } from './dto/replace-reservation-equipments.dto.js';
 import { UpdateReservationDto } from './dto/update-reservation.dto.js';
 
 const BLOCKING_STATUSES: ReservationStatus[] = [
@@ -46,7 +51,34 @@ const EXTENDABLE_STATUSES: ReservationStatus[] = [
   ReservationStatus.APPROVED,
 ];
 
+const EQUIPMENT_EDITABLE_STATUSES: ReservationStatus[] = [
+  ReservationStatus.PENDING,
+  ReservationStatus.APPROVED,
+];
+
+function toRequestedEquipments(
+  items: { quantity: number; equipment: { id: string } }[] | undefined,
+): RequestedEquipment[] {
+  return (items ?? []).map((item) => ({
+    equipmentId: item.equipment.id,
+    quantity: item.quantity,
+  }));
+}
+
+function summarizeEquipments(
+  items: { quantity: number; equipment: { id: string; name: string } }[] | undefined,
+): Prisma.InputJsonValue {
+  return (items ?? []).map((item) => ({
+    equipmentId: item.equipment.id,
+    name: item.equipment.name,
+    quantity: item.quantity,
+  }));
+}
+
 const MAX_EXTENSION_MS = 24 * 60 * 60 * 1000;
+
+const COMPLETION_BATCH_SIZE = 500;
+export const COMPLETION_CATCH_UP_INTERVAL_MS = 60_000;
 
 const notificationDateFormatter = new Intl.DateTimeFormat('fr-FR', {
   timeZone: 'Africa/Abidjan',
@@ -114,17 +146,128 @@ const reservationSelect = {
       company: { select: { id: true, name: true } },
     },
   },
+  equipments: {
+    select: {
+      quantity: true,
+      equipment: { select: { id: true, name: true } },
+    },
+    orderBy: { equipment: { name: 'asc' } },
+  },
 } satisfies Prisma.ReservationSelect;
 
 @Injectable()
 export class ReservationsService {
+  private lastCompletionRunAt: number | null = null;
+  private completionInFlight: Promise<number> | null = null;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly accessScope: AccessScopeService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly realtime: RealtimeService,
+    private readonly equipmentAvailability: EquipmentAvailabilityService,
   ) {}
+
+  /**
+   * APPROVED reservations whose end (server time) is reached become COMPLETED.
+   * PENDING, REJECTED, CANCELLED and COMPLETED reservations are never touched.
+   * Idempotent: a second call with nothing left to complete returns 0.
+   */
+  async completeEndedReservations(now: Date = new Date()): Promise<number> {
+    const endedWhere = {
+      status: ReservationStatus.APPROVED,
+      endAt: { lte: now },
+    } satisfies Prisma.ReservationWhereInput;
+
+    let completedTotal = 0;
+    for (;;) {
+      const ended = await this.prisma.reservation.findMany({
+        where: endedWhere,
+        select: { id: true },
+        orderBy: { endAt: 'asc' },
+        take: COMPLETION_BATCH_SIZE,
+      });
+      if (ended.length === 0) break;
+
+      const ids = ended.map((reservation) => reservation.id);
+      const { count } = await this.prisma.reservation.updateMany({
+        // Re-checking the status keeps a concurrent cancel/reject from being overwritten.
+        where: { ...endedWhere, id: { in: ids } },
+        data: { status: ReservationStatus.COMPLETED },
+      });
+      completedTotal += count;
+
+      if (count > 0) {
+        const completed = await this.prisma.reservation.findMany({
+          where: { id: { in: ids }, status: ReservationStatus.COMPLETED },
+          select: reservationSelect,
+        });
+        await this.recordCompletions(completed);
+      }
+
+      if (ended.length < COMPLETION_BATCH_SIZE) break;
+    }
+
+    return completedTotal;
+  }
+
+  /**
+   * Read-path catch-up (the host may suspend the process between scheduled runs):
+   * runs at most once per minute and never fails the calling request.
+   */
+  async completeEndedReservationsIfStale(now: Date = new Date()): Promise<void> {
+    if (this.completionInFlight) {
+      await this.completionInFlight.catch(() => 0);
+      return;
+    }
+    if (
+      this.lastCompletionRunAt !== null &&
+      now.getTime() - this.lastCompletionRunAt < COMPLETION_CATCH_UP_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    this.lastCompletionRunAt = now.getTime();
+    this.completionInFlight = this.completeEndedReservations(now);
+    try {
+      await this.completionInFlight;
+    } catch {
+      // Best effort: the scheduler will retry; reads must keep working.
+    } finally {
+      this.completionInFlight = null;
+    }
+  }
+
+  private async recordCompletions(
+    completed: Prisma.ReservationGetPayload<{ select: typeof reservationSelect }>[],
+  ): Promise<void> {
+    await Promise.all(
+      completed.map((reservation) =>
+        this.audit.log({
+          userId: null,
+          action: AuditAction.STATUS_CHANGE,
+          entity: 'Reservation',
+          entityId: reservation.id,
+          metadata: {
+            companyId: reservation.companyId,
+            previousStatus: ReservationStatus.APPROVED,
+            status: ReservationStatus.COMPLETED,
+            reason: 'END_REACHED',
+            endAt: reservation.endAt.toISOString(),
+          },
+        }),
+      ),
+    );
+
+    for (const reservation of completed) {
+      this.realtime.publishReservation(
+        REALTIME_EVENTS.RESERVATION_UPDATED,
+        reservation,
+        { availabilityChanged: false },
+      );
+    }
+  }
 
   async checkAvailability(actor: AuthenticatedUser, query: AvailabilityQueryDto) {
     const startAt = new Date(query.startAt);
@@ -193,6 +336,11 @@ export class ReservationsService {
     return paginate(data, total, query.page, query.limit);
   }
 
+  /**
+   * Group-wide resource occupancy for the calendar.
+   * Every active member sees busy slots of the whole Group; personal fields
+   * (requester, subject, company) are only exposed when `canViewReservation`.
+   */
   async calendar(actor: AuthenticatedUser, query: CalendarQueryDto) {
     const startDate = new Date(query.startDate);
     const endDate = new Date(query.endDate);
@@ -202,42 +350,46 @@ export class ReservationsService {
       );
     }
 
-    const scopeWhere = this.accessScope.reservationListWhere(actor, {
-      companyId: query.companyId,
-      directionId: query.directionId,
-    });
+    const filters: Prisma.ReservationWhereInput[] = [];
 
-    const resourceFilter: Prisma.ReservationWhereInput = {};
-    if (query.resourceType === ResourceType.VEHICLE && query.resourceId) {
-      resourceFilter.resourceType = ResourceType.VEHICLE;
-      resourceFilter.vehicleId = query.resourceId;
-    } else if (query.resourceType === ResourceType.ROOM && query.resourceId) {
-      resourceFilter.resourceType = ResourceType.ROOM;
-      resourceFilter.roomId = query.resourceId;
-    } else if (query.resourceType) {
-      resourceFilter.resourceType = query.resourceType;
+    if (actor.role === Role.GROUP_ADMIN && query.companyId) {
+      filters.push({ companyId: query.companyId });
+    }
+    if (
+      (actor.role === Role.GROUP_ADMIN || actor.role === Role.COMPANY_ADMIN) &&
+      query.directionId
+    ) {
+      filters.push({ directionId: query.directionId });
     }
 
-    const where: Prisma.ReservationWhereInput = {
-      AND: [
-        scopeWhere,
-        resourceFilter,
-        {
-          startAt: { lt: endDate },
-          endAt: { gt: startDate },
-          status: {
-            in: [
-              ReservationStatus.PENDING,
-              ReservationStatus.APPROVED,
-              ReservationStatus.COMPLETED,
-            ],
-          },
-        },
-      ],
-    };
+    if (query.resourceType === ResourceType.VEHICLE && query.resourceId) {
+      filters.push({
+        resourceType: ResourceType.VEHICLE,
+        vehicleId: query.resourceId,
+      });
+    } else if (query.resourceType === ResourceType.ROOM && query.resourceId) {
+      filters.push({
+        resourceType: ResourceType.ROOM,
+        roomId: query.resourceId,
+      });
+    } else if (query.resourceType) {
+      filters.push({ resourceType: query.resourceType });
+    }
+
+    filters.push({
+      startAt: { lt: endDate },
+      endAt: { gt: startDate },
+      status: {
+        in: [
+          ReservationStatus.PENDING,
+          ReservationStatus.APPROVED,
+          ReservationStatus.COMPLETED,
+        ],
+      },
+    });
 
     const reservations = await this.prisma.reservation.findMany({
-      where,
+      where: { AND: filters },
       select: {
         id: true,
         status: true,
@@ -245,6 +397,7 @@ export class ReservationsService {
         vehicleId: true,
         roomId: true,
         companyId: true,
+        directionId: true,
         startAt: true,
         endAt: true,
         destination: true,
@@ -259,6 +412,36 @@ export class ReservationsService {
 
     return reservations.map((r) => {
       const isVehicle = r.resourceType === ResourceType.VEHICLE;
+      const resourceName = isVehicle
+        ? r.vehicle
+          ? `${r.vehicle.brand} ${r.vehicle.model}`
+          : 'Véhicule'
+        : r.room?.name ?? 'Salle de réunion';
+      const resourceDetail = isVehicle
+        ? r.vehicle?.registrationNumber ?? null
+        : r.room?.location ?? null;
+      const resourceId = isVehicle ? r.vehicleId : r.roomId;
+      const canView = this.accessScope.canViewReservation(actor, r);
+
+      if (!canView) {
+        return {
+          id: r.id,
+          title: resourceName,
+          start: r.startAt.toISOString(),
+          end: r.endAt.toISOString(),
+          status: r.status,
+          resourceType: r.resourceType,
+          resourceId,
+          companyId: null,
+          resourceName,
+          resourceDetail,
+          context: null,
+          userId: null,
+          requesterName: null,
+          opaque: true,
+        };
+      }
+
       return {
         id: r.id,
         title: isVehicle
@@ -270,19 +453,14 @@ export class ReservationsService {
         end: r.endAt.toISOString(),
         status: r.status,
         resourceType: r.resourceType,
-        resourceId: isVehicle ? r.vehicleId : r.roomId,
+        resourceId,
         companyId: r.companyId,
-        resourceName: isVehicle
-          ? r.vehicle
-            ? `${r.vehicle.brand} ${r.vehicle.model}`
-            : 'Véhicule'
-          : r.room?.name ?? 'Salle de réunion',
-        resourceDetail: isVehicle
-          ? r.vehicle?.registrationNumber ?? null
-          : r.room?.location ?? null,
+        resourceName,
+        resourceDetail,
         context: (isVehicle ? r.destination : r.meetingSubject) ?? null,
         userId: r.userId,
         requesterName: `${r.user.firstName} ${r.user.lastName}`.trim(),
+        opaque: false,
       };
     });
   }
@@ -348,6 +526,7 @@ export class ReservationsService {
         );
       }
     } else {
+      // Room capacity is indicative only: participants may exceed it.
       const participantCount =
         dto.participantCount ?? existing.participantCount ?? undefined;
       if (participantCount === undefined) {
@@ -355,13 +534,13 @@ export class ReservationsService {
           'Le nombre de participants est requis.',
         );
       }
-      const capacity = existing.room?.capacity;
-      if (capacity !== undefined && participantCount > capacity) {
-        throw new BadRequestException(
-          `Le nombre de participants ne peut pas dépasser la capacité (${capacity}).`,
-        );
-      }
     }
+
+    const slotChanged =
+      startAt.getTime() !== existing.startAt.getTime() ||
+      endAt.getTime() !== existing.endAt.getTime();
+    const equipmentItems =
+      dto.equipments ?? toRequestedEquipments(existing.equipments);
 
     const reservation = await this.withResourceLock(existing, async (tx) => {
       await this.assertNoConflict(
@@ -375,12 +554,32 @@ export class ReservationsService {
         },
         tx,
       );
+      if (dto.equipments !== undefined || slotChanged) {
+        await this.equipmentAvailability.assertEquipmentsBookable(tx, {
+          resourceType: existing.resourceType,
+          startAt,
+          endAt,
+          items: equipmentItems,
+          excludeReservationId: id,
+        });
+      }
 
       return tx.reservation.update({
       where: { id },
       data: {
         startAt,
         endAt,
+        ...(dto.equipments !== undefined
+          ? {
+              equipments: {
+                deleteMany: {},
+                create: dto.equipments.map((item) => ({
+                  equipmentId: item.equipmentId,
+                  quantity: item.quantity,
+                })),
+              },
+            }
+          : {}),
         ...(dto.destination !== undefined
           ? { destination: dto.destination.trim() }
           : {}),
@@ -422,6 +621,138 @@ export class ReservationsService {
     );
 
     return reservation;
+  }
+
+  /**
+   * Replaces the equipment list of an open reservation that has not started yet.
+   * The business status is kept (an APPROVED reservation stays APPROVED) and the
+   * approvers are notified when the reservation was already approved.
+   */
+  async replaceEquipments(
+    id: string,
+    dto: ReplaceReservationEquipmentsDto,
+    actor: AuthenticatedUser,
+  ) {
+    const existing = await this.findById(id, actor);
+
+    const canEdit =
+      this.accessScope.canModifyOwnReservation(actor, existing.userId) ||
+      this.accessScope.canApproveReservation(actor, existing);
+    if (!canEdit) {
+      throw new ForbiddenException(
+        'Vous n’êtes pas autorisé à modifier les équipements de cette réservation.',
+      );
+    }
+    if (!EQUIPMENT_EDITABLE_STATUSES.includes(existing.status)) {
+      throw new BadRequestException(
+        'Seuls les équipements d’une réservation en attente ou approuvée peuvent être modifiés.',
+      );
+    }
+    // Same rule as the cancellation: a started reservation is history, whatever the role.
+    const now = new Date();
+    if (existing.startAt <= now) {
+      throw new BadRequestException(
+        'Impossible de modifier les équipements d’une réservation dont la date de début est passée.',
+      );
+    }
+
+    const items: RequestedEquipment[] = dto.equipments.map((item) => ({
+      equipmentId: item.equipmentId,
+      quantity: item.quantity,
+    }));
+
+    await this.prisma.$transaction(async (tx) => {
+      await this.equipmentAvailability.assertEquipmentsBookable(tx, {
+        resourceType: existing.resourceType,
+        startAt: existing.startAt,
+        endAt: existing.endAt,
+        items,
+        excludeReservationId: id,
+      });
+
+      // Guards against a concurrent cancel, rejection or extension since the read above.
+      const { count } = await tx.reservation.updateMany({
+        where: {
+          id,
+          status: { in: EQUIPMENT_EDITABLE_STATUSES },
+          startAt: { equals: existing.startAt, gt: now },
+          endAt: existing.endAt,
+        },
+        data: { updatedAt: now },
+      });
+      if (count === 0) {
+        throw new ConflictException(
+          'Cette réservation a été modifiée entre-temps. Actualisez et réessayez.',
+        );
+      }
+
+      await tx.reservationEquipment.deleteMany({ where: { reservationId: id } });
+      if (items.length > 0) {
+        await tx.reservationEquipment.createMany({
+          data: items.map((item) => ({ reservationId: id, ...item })),
+        });
+      }
+    });
+
+    const reservation = await this.prisma.reservation.findUniqueOrThrow({
+      where: { id },
+      select: reservationSelect,
+    });
+
+    await this.audit.log({
+      userId: actor.id,
+      action: AuditAction.UPDATE,
+      entity: 'Reservation',
+      entityId: id,
+      metadata: {
+        operation: 'EQUIPMENT_UPDATE',
+        companyId: existing.companyId,
+        status: existing.status,
+        before: summarizeEquipments(existing.equipments),
+        after: summarizeEquipments(reservation.equipments),
+      },
+    });
+
+    this.realtime.publishReservation(
+      REALTIME_EVENTS.RESERVATION_UPDATED,
+      reservation,
+      { availabilityChanged: false },
+    );
+
+    if (existing.status === ReservationStatus.APPROVED) {
+      if (actor.id !== existing.userId) {
+        await this.notifications.createManyForUsers([existing.userId], {
+          ...reservationNotificationMessages.equipmentUpdatedForOwner(),
+          entityType: 'Reservation',
+          entityId: id,
+        });
+      }
+      const approverIds = (
+        await this.findCompanyApproverIds(existing.companyId)
+      ).filter((approverId) => approverId !== actor.id && approverId !== existing.userId);
+      await this.notifications.createManyForUsers(approverIds, {
+        ...reservationNotificationMessages.equipmentUpdatedForApprovers(
+          this.describeReservationResource(existing),
+        ),
+        entityType: 'Reservation',
+        entityId: id,
+      });
+    }
+
+    return reservation;
+  }
+
+  private describeReservationResource(reservation: {
+    resourceType: ResourceType;
+    vehicle: { registrationNumber: string } | null;
+    room: { name: string } | null;
+  }): string {
+    if (reservation.resourceType === ResourceType.VEHICLE) {
+      return reservation.vehicle
+        ? `le véhicule ${reservation.vehicle.registrationNumber}`
+        : 'un véhicule';
+    }
+    return reservation.room ? `la salle ${reservation.room.name}` : 'une salle';
   }
 
   async approve(id: string, actor: AuthenticatedUser) {
@@ -544,6 +875,13 @@ export class ReservationsService {
       );
     }
 
+    // Applies to every role, admins included: a started or past reservation is history.
+    if (existing.startAt <= new Date()) {
+      throw new BadRequestException(
+        'Impossible d’annuler une réservation dont la date de début est passée.',
+      );
+    }
+
     const reservation = await this.transitionStatus(
       id,
       [ReservationStatus.PENDING, ReservationStatus.APPROVED],
@@ -647,6 +985,13 @@ export class ReservationsService {
         },
         tx,
       );
+      await this.equipmentAvailability.assertEquipmentsBookable(tx, {
+        resourceType: existing.resourceType,
+        startAt: existing.endAt,
+        endAt: newEndAt,
+        items: toRequestedEquipments(existing.equipments),
+        excludeReservationId: id,
+      });
 
       // Guard on the current end and status so concurrent changes cannot be overwritten.
       return tx.reservation.updateMany({
@@ -802,8 +1147,15 @@ export class ReservationsService {
     const destination = dto.destination.trim();
     const missionReason = dto.missionReason.trim();
     const passengerCount = dto.passengerCount;
+    const equipmentItems = dto.equipments ?? [];
     const reservation = await this.withResourceLock(target, async (tx) => {
       await this.assertNoConflict({ ...target, startAt, endAt }, tx);
+      await this.equipmentAvailability.assertEquipmentsBookable(tx, {
+        resourceType: ResourceType.VEHICLE,
+        startAt,
+        endAt,
+        items: equipmentItems,
+      });
 
       return tx.reservation.create({
         data: {
@@ -819,6 +1171,7 @@ export class ReservationsService {
           passengerCount,
           comment: dto.comment?.trim() || null,
           status: ReservationStatus.PENDING,
+          ...this.equipmentCreateData(equipmentItems),
         },
         select: reservationSelect,
       });
@@ -834,6 +1187,7 @@ export class ReservationsService {
         vehicleId: vehicle.id,
         companyId: actor.companyId,
         resourceCompanyId: vehicle.companyId,
+        equipments: summarizeEquipments(reservation.equipments),
       },
     });
 
@@ -874,7 +1228,6 @@ export class ReservationsService {
       select: {
         id: true,
         companyId: true,
-        capacity: true,
         status: true,
         name: true,
         company: { select: { id: true, status: true, name: true } },
@@ -888,12 +1241,6 @@ export class ReservationsService {
     this.assertManagingCompanyActive(room.company.status);
     this.assertResourceAvailable(room.status, 'salle');
 
-    if (dto.participantCount > room.capacity) {
-      throw new BadRequestException(
-        `Le nombre de participants ne peut pas dépasser la capacité (${room.capacity}).`,
-      );
-    }
-
     const target = {
       resourceType: ResourceType.ROOM,
       vehicleId: null,
@@ -901,8 +1248,15 @@ export class ReservationsService {
     };
     const meetingSubject = dto.meetingSubject.trim();
     const participantCount = dto.participantCount;
+    const equipmentItems = dto.equipments ?? [];
     const reservation = await this.withResourceLock(target, async (tx) => {
       await this.assertNoConflict({ ...target, startAt, endAt }, tx);
+      await this.equipmentAvailability.assertEquipmentsBookable(tx, {
+        resourceType: ResourceType.ROOM,
+        startAt,
+        endAt,
+        items: equipmentItems,
+      });
 
       return tx.reservation.create({
         data: {
@@ -917,6 +1271,7 @@ export class ReservationsService {
           participantCount,
           comment: dto.comment?.trim() || null,
           status: ReservationStatus.PENDING,
+          ...this.equipmentCreateData(equipmentItems),
         },
         select: reservationSelect,
       });
@@ -932,6 +1287,7 @@ export class ReservationsService {
         roomId: room.id,
         companyId: actor.companyId,
         resourceCompanyId: room.companyId,
+        equipments: summarizeEquipments(reservation.equipments),
       },
     });
 
@@ -949,6 +1305,20 @@ export class ReservationsService {
     );
 
     return reservation;
+  }
+
+  private equipmentCreateData(
+    items: RequestedEquipment[],
+  ): Pick<Prisma.ReservationUncheckedCreateInput, 'equipments'> {
+    if (items.length === 0) return {};
+    return {
+      equipments: {
+        create: items.map((item) => ({
+          equipmentId: item.equipmentId,
+          quantity: item.quantity,
+        })),
+      },
+    };
   }
 
   /** Vehicles and rooms are shared by the Group: any member may check their availability. */

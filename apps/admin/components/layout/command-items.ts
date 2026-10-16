@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { Building2, Car, DoorOpen, GitBranch, LayoutDashboard, UserPlus } from 'lucide-react';
+import { Building2, Car, DoorOpen, GitBranch, LayoutDashboard, Package, UserPlus } from 'lucide-react';
 import type { Role } from '@resource-manager/types';
 import { getNavSections, NAV_ICONS } from '@/components/layout/navigation';
 import { canAccessRoute } from '@/lib/rbac';
@@ -32,6 +32,15 @@ const CREATE_ACTIONS: (CommandItem & { allowed: (role: Role) => boolean })[] = [
     icon: DoorOpen,
     keywords: 'ajouter créer salle de réunion',
     allowed: canManageResources,
+  },
+  {
+    id: 'new-equipment',
+    group: 'Actions',
+    label: 'Nouvel équipement',
+    href: '/equipments/new',
+    icon: Package,
+    keywords: 'ajouter créer matériel vidéoprojecteur catalogue',
+    allowed: (role) => canAccessRoute(role, '/equipments/new'),
   },
   {
     id: 'new-user',

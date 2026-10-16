@@ -15,6 +15,14 @@ export default () => ({
   expoPush: {
     accessToken: process.env.EXPO_ACCESS_TOKEN || undefined,
   },
+  mail: {
+    host: process.env.SMTP_HOST || undefined,
+    port: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : undefined,
+    secure: process.env.SMTP_SECURE === 'true',
+    user: process.env.SMTP_USER || undefined,
+    password: process.env.SMTP_PASSWORD || undefined,
+    from: process.env.MAIL_FROM || undefined,
+  },
   trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS ?? '0', 10),
   deployment: {
     environment: process.env.APP_ENV ?? 'development',

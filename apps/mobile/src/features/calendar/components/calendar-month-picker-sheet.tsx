@@ -14,6 +14,7 @@ import {
   toDayKey,
   type CalendarFiltersValue,
 } from '@/features/calendar/lib/calendar';
+import { useNow } from '@/hooks/use-now';
 import { colors, radius, spacing } from '@/constants/theme';
 
 const WEEKDAY_HEADERS = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
@@ -39,11 +40,12 @@ export function CalendarMonthPickerSheet({
   onClose,
 }: CalendarMonthPickerSheetProps) {
   const [month, setMonth] = useState(() => startOfMonth(selectedDate));
+  const now = useNow(60_000);
   const query = useCalendarMonth(month);
   const grid = getMonthGrid(month);
   const counts =
     query.data && !query.isPlaceholderData
-      ? countEventsByDay(applyCalendarFilters(query.data, filters), grid.flat())
+      ? countEventsByDay(applyCalendarFilters(query.data, filters, now), grid.flat())
       : null;
 
   const canGoPrevious = startOfMonth(addMonths(month, -1)) >= startOfMonth(minDate);

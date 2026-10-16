@@ -7,6 +7,7 @@ import { useAuth } from '@/features/auth/auth-provider';
 import { useNow } from '@/hooks/use-now';
 import { useCancelReservation, useReservation } from '@/features/reservations/hooks/use-reservations';
 import { isOpenStatus } from '@/features/reservations/lib/reservation-list';
+import { getDisplayStatus } from '@/features/reservations/lib/reservation-status';
 import {
   canCancelReservation,
   formatDetailDay,
@@ -20,6 +21,9 @@ import { ReservationActions } from '@/features/reservations/components/detail/re
 import { ReservationInfoCard } from '@/features/reservations/components/detail/reservation-info-card';
 import { ReservationHistory } from '@/features/reservations/components/detail/reservation-history';
 import { ExtendReservationSheet } from '@/features/reservations/components/detail/extend-reservation-sheet';
+import { EditEquipmentsSheet } from '@/features/reservations/components/detail/edit-equipments-sheet';
+import { ReservationEquipmentsCard } from '@/features/reservations/components/detail/reservation-equipments-card';
+import { canEditReservationEquipments } from '@/features/reservations/lib/equipment-selection';
 import {
   ReservationDetailError,
   ReservationDetailSkeleton,
@@ -48,6 +52,7 @@ export default function ReservationDetailScreen() {
   const cancelMutation = useCancelReservation();
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   const [extendOpen, setExtendOpen] = useState(false);
+  const [equipmentsOpen, setEquipmentsOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -92,7 +97,12 @@ export default function ReservationDetailScreen() {
   const isOpen = isOpenStatus(reservation.status);
   const inProgress = isOpen && timing.phase === 'active';
   const canExtend = getExtensionIneligibility(reservation, now, actor) === null;
-  const canCancel = canCancelReservation(reservation, actor);
+  const canCancel = canCancelReservation(reservation, now, actor);
+  const canEditEquipments = canEditReservationEquipments(reservation, now, actor);
+  const displayedReservation: Reservation = {
+    ...reservation,
+    status: getDisplayStatus(reservation, now),
+  };
 
   const refresh = async () => {
     setRefreshing(true);
@@ -111,6 +121,7 @@ export default function ReservationDetailScreen() {
     } catch (error) {
       setConfirmCancelOpen(false);
       Alert.alert('Annulation impossible', getCancelErrorMessage(error));
+      void query.refetch();
     }
   };
 
@@ -139,8 +150,8 @@ export default function ReservationDetailScreen() {
       >
         {successMessage ? <ReservationSuccessBanner message={successMessage} /> : null}
 
-        <ReservationHeroCard reservation={reservation} inProgress={inProgress} />
-        <ReservationStatusNotice reservation={reservation} inProgress={inProgress} />
+        <ReservationHeroCard reservation={displayedReservation} inProgress={inProgress} />
+        <ReservationStatusNotice reservation={displayedReservation} inProgress={inProgress} />
         <ReservationTimeCard timing={timing} now={now} showRelative={isOpen} />
 
         <ReservationActions
@@ -152,7 +163,12 @@ export default function ReservationDetailScreen() {
         />
 
         <ReservationInfoCard reservation={reservation} currentUserId={user?.id} />
-        <ReservationHistory reservation={reservation} />
+        <ReservationEquipmentsCard
+          equipments={reservation.equipments}
+          canEdit={canEditEquipments}
+          onEdit={() => setEquipmentsOpen(true)}
+        />
+        <ReservationHistory reservation={displayedReservation} />
       </ScrollView>
 
       {extendOpen ? (
@@ -164,14 +180,21 @@ export default function ReservationDetailScreen() {
         />
       ) : null}
 
+      {equipmentsOpen ? (
+        <EditEquipmentsSheet
+          reservation={reservation}
+          onClose={() => setEquipmentsOpen(false)}
+          onUpdated={() => {
+            setEquipmentsOpen(false);
+            setSuccessMessage('Les équipements de la réservation ont été mis à jour.');
+          }}
+        />
+      ) : null}
+
       <ConfirmModal
         visible={confirmCancelOpen}
         title="Annuler la réservation ?"
-        message={
-          inProgress
-            ? 'Cette réservation est en cours. La ressource sera libérée immédiatement. Cette action est définitive.'
-            : 'La ressource sera libérée pour cette période. Cette action est définitive.'
-        }
+        message="La ressource sera libérée pour cette période. Cette action est définitive."
         confirmLabel="Annuler la réservation"
         cancelLabel="Conserver"
         danger

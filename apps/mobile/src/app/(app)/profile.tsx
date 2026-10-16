@@ -20,6 +20,7 @@ import {
   useUnreadNotificationsCount,
 } from '@/features/notifications/hooks/use-notifications';
 import { openNotificationSettings } from '@/lib/notifications';
+import { BrandLogo } from '@/components/brand-logo';
 import { Screen } from '@/components/ui/Screen';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
@@ -205,7 +206,8 @@ export default function ProfileScreen() {
         </StaggerItem>
 
         <View style={styles.footer}>
-          <Text style={styles.footerTitle}>Resource Manager</Text>
+          <BrandLogo size={40} />
+          <Text style={styles.footerTitle}>SUZANG HUB</Text>
           {APP_VERSION ? <Text style={styles.footerVersion}>Version {APP_VERSION}</Text> : null}
         </View>
       </ScrollView>
@@ -303,7 +305,7 @@ const styles = StyleSheet.create({
   },
   footer: {
     alignItems: 'center',
-    gap: 2,
+    gap: spacing.sm,
     paddingTop: spacing.sm,
   },
   footerTitle: {

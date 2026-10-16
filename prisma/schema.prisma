@@ -66,6 +66,14 @@ enum NotificationType {
   RESERVATION_REJECTED
   RESERVATION_CANCELLED
   RESERVATION_EXTENDED
+  RESERVATION_EQUIPMENT_UPDATED
+}
+
+/// Which reservations an equipment may be requested with.
+enum EquipmentScope {
+  ROOM
+  VEHICLE
+  BOTH
 }
 
 /// Root organisation of the internal Group application (not a SaaS tenant).
@@ -87,16 +95,16 @@ model Company {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
-  group         Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  directions    Direction[]
-  users         User[]
-  vehicles      Vehicle[]
-  meetingRooms  MeetingRoom[]
-  reservations  Reservation[]
+  group        Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  directions   Direction[]
+  users        User[]
+  vehicles     Vehicle[]
+  meetingRooms MeetingRoom[]
+  reservations Reservation[]
 
+  @@unique([groupId, code])
   @@index([groupId])
   @@index([status])
-  @@unique([groupId, code])
 }
 
 /// Optional organisational level under a Company.
@@ -110,13 +118,13 @@ model Direction {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
-  company      Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   users        User[]
   reservations Reservation[]
 
+  @@unique([companyId, code])
   @@index([companyId])
   @@index([status])
-  @@unique([companyId, code])
 }
 
 model User {
@@ -132,13 +140,14 @@ model User {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  company       Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  direction     Direction?     @relation(fields: [directionId], references: [id], onDelete: SetNull)
-  refreshTokens RefreshToken[]
-  reservations  Reservation[]
-  notifications Notification[]
-  pushTokens    UserPushToken[]
-  auditLogs     AuditLog[]
+  company             Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  direction           Direction?           @relation(fields: [directionId], references: [id], onDelete: SetNull)
+  refreshTokens       RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+  reservations        Reservation[]
+  notifications       Notification[]
+  pushTokens          UserPushToken[]
+  auditLogs           AuditLog[]
 
   @@index([companyId])
   @@index([directionId])
@@ -161,6 +170,21 @@ model RefreshToken {
   @@index([expiresAt])
 }
 
+/// One-time password reset code. Only the bcrypt hash of the 6-digit code is stored.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int       @default(0)
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
 model Vehicle {
   id                 String         @id @default(cuid())
   companyId          String
@@ -173,7 +197,7 @@ model Vehicle {
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
 
-  company      Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
   reservations Reservation[]
   image        VehicleImage?
 
@@ -194,50 +218,83 @@ model VehicleImage {
 }
 
 model MeetingRoom {
-  id          String         @id @default(cuid())
-  companyId   String
-  name        String
-  location    String?
-  capacity    Int
-  status      ResourceStatus @default(AVAILABLE)
-  description String?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id             String         @id @default(cuid())
+  companyId      String
+  name           String
+  location       String?
+  capacity       Int
+  status         ResourceStatus @default(AVAILABLE)
+  description    String?
+  /// Fixed, non-bookable features of the room (wall screen, built-in video conferencing…).
+  fixedEquipment String[]       @default([])
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
-  company      Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
   reservations Reservation[]
 
   @@index([companyId])
   @@index([status])
 }
 
+/// Group-wide catalogue of bookable equipment (no managing company): administered by GROUP_ADMIN only.
+model Equipment {
+  id          String         @id @default(cuid())
+  name        String         @unique
+  description String?
+  quantity    Int
+  scope       EquipmentScope
+  status      ResourceStatus @default(AVAILABLE)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  reservations ReservationEquipment[]
+
+  @@index([status])
+}
+
+/// Equipment requested with a reservation; the stock it consumes is freed by the reservation status.
+model ReservationEquipment {
+  reservationId String
+  equipmentId   String
+  quantity      Int
+  createdAt     DateTime @default(now())
+
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  equipment   Equipment   @relation(fields: [equipmentId], references: [id], onDelete: Restrict)
+
+  @@id([reservationId, equipmentId])
+  @@index([equipmentId])
+}
+
 /// Single reservation model for vehicles and rooms (resourceType discriminates).
 model Reservation {
-  id         String            @id @default(cuid())
-  companyId  String
-  userId     String
-  directionId String?
-  resourceType ResourceType
-  vehicleId  String?
-  roomId     String?
-  startAt    DateTime
-  endAt      DateTime
-  destination    String?
-  missionReason  String?
-  passengerCount Int?
+  id               String            @id @default(cuid())
+  companyId        String
+  userId           String
+  directionId      String?
+  resourceType     ResourceType
+  vehicleId        String?
+  roomId           String?
+  startAt          DateTime
+  endAt            DateTime
+  destination      String?
+  missionReason    String?
+  passengerCount   Int?
   meetingSubject   String?
   participantCount Int?
   comment          String?
   status           ReservationStatus @default(PENDING)
   rejectionReason  String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
-  company   Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  user      User       @relation(fields: [userId], references: [id], onDelete: Restrict)
-  direction Direction? @relation(fields: [directionId], references: [id], onDelete: SetNull)
-  vehicle   Vehicle?   @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
-  room      MeetingRoom? @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  company    Company                @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  user       User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  direction  Direction?             @relation(fields: [directionId], references: [id], onDelete: SetNull)
+  vehicle    Vehicle?               @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  room       MeetingRoom?           @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  equipments ReservationEquipment[]
 
   @@index([companyId])
   @@index([userId])

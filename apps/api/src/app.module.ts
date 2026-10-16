@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import configuration from './config/configuration.js';
 import { validateEnv } from './config/env.validation.js';
@@ -11,8 +12,10 @@ import { AuthModule } from './modules/auth/auth.module.js';
 import { CompaniesModule } from './modules/companies/companies.module.js';
 import { DashboardModule } from './modules/dashboard/dashboard.module.js';
 import { DirectionsModule } from './modules/directions/directions.module.js';
+import { EquipmentsModule } from './modules/equipments/equipments.module.js';
 import { GroupModule } from './modules/group/group.module.js';
 import { HealthModule } from './modules/health/health.module.js';
+import { MailModule } from './modules/mail/mail.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { RealtimeModule } from './modules/realtime/realtime.module.js';
 import { ReservationsModule } from './modules/reservations/reservations.module.js';
@@ -36,10 +39,12 @@ import { AppService } from './app.service.js';
         limit: 100,
       },
     ]),
+    ScheduleModule.forRoot(),
     PrismaModule,
     CommonModule,
     HealthModule,
     AuditModule,
+    MailModule,
     AuthModule,
     RealtimeModule,
     GroupModule,
@@ -48,6 +53,7 @@ import { AppService } from './app.service.js';
     UsersModule,
     VehiclesModule,
     RoomsModule,
+    EquipmentsModule,
     NotificationsModule,
     ReservationsModule,
     DashboardModule,

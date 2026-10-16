@@ -10,12 +10,15 @@ export class AppError extends Error {
   }
 }
 
+/** API code of a 409 caused by requested equipment, not by the resource slot. */
+export const EQUIPMENT_UNAVAILABLE_CODE = 'EQUIPMENT_UNAVAILABLE';
+
 export function mapApiError(error: unknown): AppError {
   if (error instanceof AppError) return error;
 
   if (typeof error === 'object' && error !== null && 'isAxiosError' in error) {
     const axiosError = error as {
-      response?: { status?: number; data?: { message?: string | string[] } };
+      response?: { status?: number; data?: { message?: string | string[]; code?: string } };
       message?: string;
       code?: string;
     };
@@ -39,6 +42,9 @@ export function mapApiError(error: unknown): AppError {
       case 404:
         return new AppError('Ressource introuvable.', 404);
       case 409:
+        if (axiosError.response?.data?.code === EQUIPMENT_UNAVAILABLE_CODE && serverMessage) {
+          return new AppError(serverMessage, 409, EQUIPMENT_UNAVAILABLE_CODE);
+        }
         return new AppError(
           'Cette ressource vient d’être réservée. Veuillez choisir une autre période.',
           409,

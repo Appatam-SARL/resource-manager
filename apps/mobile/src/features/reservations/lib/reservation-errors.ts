@@ -1,7 +1,8 @@
-import { AppError } from '@/lib/errors';
+import { AppError, EQUIPMENT_UNAVAILABLE_CODE } from '@/lib/errors';
 
 export type ReservationSubmitError = {
-  kind: 'conflict' | 'general';
+  /** "equipment": the slot is free but a requested equipment is no longer available. */
+  kind: 'conflict' | 'equipment' | 'general';
   message: string;
 };
 
@@ -15,6 +16,9 @@ export function getReservationSubmitError(error: unknown): ReservationSubmitErro
   }
   switch (error.status) {
     case 409:
+      if (error.code === EQUIPMENT_UNAVAILABLE_CODE) {
+        return { kind: 'equipment', message: error.message };
+      }
       return { kind: 'conflict', message: CONFLICT_MESSAGE };
     case 401:
       return { kind: 'general', message: 'Votre session a expiré. Veuillez vous reconnecter.' };

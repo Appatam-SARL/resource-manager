@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import {
   EntityStatus,
+  EquipmentScope,
   NotificationType,
   ReservationStatus,
   ResourceStatus,
@@ -19,6 +20,7 @@ import type { AuditService } from '../audit/audit.service.js';
 import type { NotificationsService } from '../notifications/notifications.service.js';
 import type { PrismaService } from '../../database/prisma.service.js';
 import type { RealtimeService } from '../realtime/realtime.service.js';
+import { EquipmentAvailabilityService } from '../equipments/equipment-availability.service.js';
 import { ReservationsService } from './reservations.service.js';
 
 function makeUser(
@@ -58,6 +60,12 @@ describe('ReservationsService', () => {
       count: ReturnType<typeof vi.fn>;
     };
     user: { findMany: ReturnType<typeof vi.fn> };
+    equipment: { findMany: ReturnType<typeof vi.fn> };
+    reservationEquipment: {
+      findMany: ReturnType<typeof vi.fn>;
+      deleteMany: ReturnType<typeof vi.fn>;
+      createMany: ReturnType<typeof vi.fn>;
+    };
     $transaction: ReturnType<typeof vi.fn>;
     $executeRaw: ReturnType<typeof vi.fn>;
   };
@@ -84,6 +92,12 @@ describe('ReservationsService', () => {
         count: vi.fn(),
       },
       user: { findMany: vi.fn().mockResolvedValue([]) },
+      equipment: { findMany: vi.fn().mockResolvedValue([]) },
+      reservationEquipment: {
+        findMany: vi.fn().mockResolvedValue([]),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        createMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
       $transaction: vi.fn(
         (work: (tx: unknown) => Promise<unknown>): Promise<unknown> => work(prisma),
       ),
@@ -101,6 +115,7 @@ describe('ReservationsService', () => {
       audit as unknown as AuditService,
       notifications as unknown as NotificationsService,
       realtime as unknown as RealtimeService,
+      new EquipmentAvailabilityService(prisma as unknown as PrismaService, accessScope),
     );
   });
 
@@ -226,7 +241,7 @@ describe('ReservationsService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('rejects participantCount greater than room capacity', async () => {
+    it('accepts participantCount greater than room capacity (capacity is indicative)', async () => {
       const actor = makeUser({
         role: Role.EMPLOYEE,
         companyId: 'company-a',
@@ -240,20 +255,84 @@ describe('ReservationsService', () => {
         name: 'Salle A',
         company: { id: 'company-a', status: EntityStatus.ACTIVE, name: 'A' },
       });
+      prisma.reservation.create.mockResolvedValue({
+        id: 'res-room',
+        companyId: 'company-a',
+        status: ReservationStatus.PENDING,
+      });
+
+      const result = await service.create(
+        {
+          resourceType: ResourceType.ROOM,
+          roomId: 'room-1',
+          startAt: futureStart,
+          endAt: futureEnd,
+          meetingSubject: 'Réunion',
+          participantCount: 30,
+        },
+        actor,
+      );
+
+      expect(result.id).toBe('res-room');
+      expect(prisma.reservation.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            participantCount: 30,
+            status: ReservationStatus.PENDING,
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('update — capacity', () => {
+    const owner = makeUser({ id: 'employee-1', role: Role.EMPLOYEE, companyId: 'company-a' });
+    const pendingBase = {
+      id: 'res-1',
+      companyId: 'company-a',
+      userId: 'employee-1',
+      directionId: null,
+      startAt: new Date(futureStart),
+      endAt: new Date(futureEnd),
+      status: ReservationStatus.PENDING,
+    };
+
+    it('accepts raising participantCount above the room capacity', async () => {
+      const pendingRoom = {
+        ...pendingBase,
+        resourceType: ResourceType.ROOM,
+        vehicleId: null,
+        roomId: 'room-1',
+        participantCount: 4,
+        room: { capacity: 10 },
+      };
+      prisma.reservation.findUnique.mockResolvedValue(pendingRoom);
+      prisma.reservation.update.mockResolvedValue({ ...pendingRoom, participantCount: 25 });
+
+      const result = await service.update('res-1', { participantCount: 25 }, owner);
+
+      expect(result.participantCount).toBe(25);
+      expect(prisma.reservation.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ participantCount: 25 }),
+        }),
+      );
+    });
+
+    it('still rejects raising passengerCount above the vehicle seats', async () => {
+      prisma.reservation.findUnique.mockResolvedValue({
+        ...pendingBase,
+        resourceType: ResourceType.VEHICLE,
+        vehicleId: 'vehicle-1',
+        roomId: null,
+        passengerCount: 2,
+        vehicle: { seats: 5 },
+      });
 
       await expect(
-        service.create(
-          {
-            resourceType: ResourceType.ROOM,
-            roomId: 'room-1',
-            startAt: futureStart,
-            endAt: futureEnd,
-            meetingSubject: 'Réunion',
-            participantCount: 20,
-          },
-          actor,
-        ),
+        service.update('res-1', { passengerCount: 6 }, owner),
       ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.reservation.update).not.toHaveBeenCalled();
     });
   });
 
@@ -470,26 +549,35 @@ describe('ReservationsService', () => {
   });
 
   describe('calendar', () => {
-    it('scopes an employee to his reservations and exposes display fields', async () => {
+    const ownReservation = {
+      id: 'res-1',
+      status: ReservationStatus.APPROVED,
+      resourceType: ResourceType.VEHICLE,
+      vehicleId: 'vehicle-1',
+      roomId: null,
+      companyId: 'company-a',
+      directionId: null,
+      startAt: new Date('2026-09-28T09:00:00.000Z'),
+      endAt: new Date('2026-09-28T11:00:00.000Z'),
+      destination: 'Cocody',
+      meetingSubject: null,
+      userId: 'employee-1',
+      user: { firstName: 'Koné', lastName: 'Nonwa' },
+      vehicle: { registrationNumber: 'AB-1234-AA', brand: 'Toyota', model: 'Corolla' },
+      room: null,
+    };
+    const otherCompanyReservation = {
+      ...ownReservation,
+      id: 'res-2',
+      companyId: 'company-b',
+      userId: 'employee-b',
+      destination: 'Secret mission',
+      user: { firstName: 'Alice', lastName: 'B' },
+    };
+
+    it('returns group-wide occupancy and full fields for the viewer own reservation', async () => {
       const actor = makeUser({ id: 'employee-1', role: Role.EMPLOYEE, companyId: 'company-a' });
-      prisma.reservation.findMany.mockResolvedValue([
-        {
-          id: 'res-1',
-          status: ReservationStatus.APPROVED,
-          resourceType: ResourceType.VEHICLE,
-          vehicleId: 'vehicle-1',
-          roomId: null,
-          companyId: 'company-a',
-          startAt: new Date('2026-09-28T09:00:00.000Z'),
-          endAt: new Date('2026-09-28T11:00:00.000Z'),
-          destination: 'Cocody',
-          meetingSubject: null,
-          userId: 'employee-1',
-          user: { firstName: 'Koné', lastName: 'Nonwa' },
-          vehicle: { registrationNumber: 'AB-1234-AA', brand: 'Toyota', model: 'Corolla' },
-          room: null,
-        },
-      ]);
+      prisma.reservation.findMany.mockResolvedValue([ownReservation]);
 
       const events = await service.calendar(actor, {
         startDate: '2026-09-28T00:00:00.000Z',
@@ -499,7 +587,12 @@ describe('ReservationsService', () => {
       expect(prisma.reservation.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
-            AND: expect.arrayContaining([{ AND: [{ userId: 'employee-1' }, {}] }]),
+            AND: [
+              expect.objectContaining({
+                startAt: { lt: expect.any(Date) },
+                endAt: { gt: expect.any(Date) },
+              }),
+            ],
           },
         }),
       );
@@ -511,6 +604,29 @@ describe('ReservationsService', () => {
         context: 'Cocody',
         userId: 'employee-1',
         requesterName: 'Koné Nonwa',
+        opaque: false,
+      });
+    });
+
+    it('masks requester details for out-of-scope group slots', async () => {
+      const actor = makeUser({ id: 'employee-1', role: Role.EMPLOYEE, companyId: 'company-a' });
+      prisma.reservation.findMany.mockResolvedValue([otherCompanyReservation]);
+
+      const events = await service.calendar(actor, {
+        startDate: '2026-09-28T00:00:00.000Z',
+        endDate: '2026-10-05T00:00:00.000Z',
+      });
+
+      expect(events[0]).toMatchObject({
+        id: 'res-2',
+        title: 'Toyota Corolla',
+        resourceName: 'Toyota Corolla',
+        resourceDetail: 'AB-1234-AA',
+        context: null,
+        userId: null,
+        requesterName: null,
+        companyId: null,
+        opaque: true,
       });
     });
   });
@@ -676,6 +792,75 @@ describe('ReservationsService', () => {
           entityId: 'res-1',
         }),
       );
+    });
+  });
+
+  describe('cancel — start date', () => {
+    const owner = makeUser({ id: 'employee-1', role: Role.EMPLOYEE, companyId: 'company-a' });
+    const companyAdmin = makeUser({ id: 'admin-1', role: Role.COMPANY_ADMIN, companyId: 'company-a' });
+    const groupAdmin = makeUser({ id: 'group-1', role: Role.GROUP_ADMIN, companyId: 'company-g' });
+
+    function reservationAt(startOffsetMs: number, endOffsetMs: number) {
+      return {
+        id: 'res-1',
+        companyId: 'company-a',
+        userId: 'employee-1',
+        directionId: null,
+        resourceType: ResourceType.ROOM,
+        vehicleId: null,
+        roomId: 'room-1',
+        startAt: new Date(Date.now() + startOffsetMs),
+        endAt: new Date(Date.now() + endOffsetMs),
+        status: ReservationStatus.APPROVED,
+      };
+    }
+
+    function expectNoSideEffects() {
+      expect(prisma.reservation.updateMany).not.toHaveBeenCalled();
+      expect(audit.log).not.toHaveBeenCalled();
+      expect(notifications.createManyForUsers).not.toHaveBeenCalled();
+      expect(realtime.publishReservation).not.toHaveBeenCalled();
+    }
+
+    it('cancels a reservation that has not started yet', async () => {
+      const future = reservationAt(3_600_000, 7_200_000);
+      prisma.reservation.findUnique.mockResolvedValue(future);
+      prisma.reservation.findUniqueOrThrow.mockResolvedValue({
+        ...future,
+        status: ReservationStatus.CANCELLED,
+      });
+
+      await service.cancel('res-1', owner);
+
+      expect(prisma.reservation.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: ReservationStatus.CANCELLED } }),
+      );
+    });
+
+    it('refuses to cancel a reservation in progress', async () => {
+      prisma.reservation.findUnique.mockResolvedValue(reservationAt(-600_000, 3_600_000));
+
+      await expect(service.cancel('res-1', owner)).rejects.toThrow(
+        'Impossible d’annuler une réservation dont la date de début est passée.',
+      );
+      expectNoSideEffects();
+    });
+
+    it('refuses to cancel a reservation already finished', async () => {
+      prisma.reservation.findUnique.mockResolvedValue(reservationAt(-7_200_000, -3_600_000));
+
+      await expect(service.cancel('res-1', owner)).rejects.toBeInstanceOf(BadRequestException);
+      expectNoSideEffects();
+    });
+
+    it.each([
+      ['COMPANY_ADMIN', companyAdmin],
+      ['GROUP_ADMIN', groupAdmin],
+    ])('refuses it for a %s too', async (_role, admin) => {
+      prisma.reservation.findUnique.mockResolvedValue(reservationAt(-600_000, 3_600_000));
+
+      await expect(service.cancel('res-1', admin)).rejects.toBeInstanceOf(BadRequestException);
+      expectNoSideEffects();
     });
   });
 
@@ -953,6 +1138,301 @@ describe('ReservationsService', () => {
 
       await expect(service.approve('res-1', companyAdmin)).rejects.toBeInstanceOf(ConflictException);
       expect(realtime.publishReservation).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('equipments', () => {
+    const employee = makeUser({ id: 'employee-1', role: Role.EMPLOYEE, companyId: 'company-a' });
+    const slotStart = new Date(Date.now() + 24 * 3_600_000);
+    const slotEnd = new Date(slotStart.getTime() + 3_600_000);
+    const projector = {
+      id: 'eq-projector',
+      name: 'Vidéoprojecteur',
+      quantity: 1,
+      scope: EquipmentScope.ROOM,
+      status: ResourceStatus.AVAILABLE,
+    };
+
+    function roomBody(equipments: { equipmentId: string; quantity: number }[]) {
+      return {
+        resourceType: ResourceType.ROOM,
+        roomId: 'room-1',
+        startAt: slotStart.toISOString(),
+        endAt: slotEnd.toISOString(),
+        meetingSubject: 'Point projet',
+        participantCount: 4,
+        equipments,
+      };
+    }
+
+    function usage(quantity: number, startOffsetMs: number, endOffsetMs: number) {
+      return {
+        equipmentId: projector.id,
+        quantity,
+        reservation: {
+          startAt: new Date(slotStart.getTime() + startOffsetMs),
+          endAt: new Date(slotStart.getTime() + endOffsetMs),
+        },
+      };
+    }
+
+    beforeEach(() => {
+      prisma.meetingRoom.findUnique.mockResolvedValue({
+        id: 'room-1',
+        companyId: 'company-b',
+        status: ResourceStatus.AVAILABLE,
+        name: 'Salle Baobab',
+        company: { id: 'company-b', status: EntityStatus.ACTIVE, name: 'B' },
+      });
+      prisma.reservation.create.mockResolvedValue({
+        id: 'res-new',
+        companyId: 'company-a',
+        userId: employee.id,
+        resourceType: ResourceType.ROOM,
+        roomId: 'room-1',
+        status: ReservationStatus.PENDING,
+        equipments: [{ quantity: 1, equipment: { id: projector.id, name: projector.name } }],
+      });
+      prisma.equipment.findMany.mockResolvedValue([projector]);
+    });
+
+    it('books an available equipment with the reservation, under a lock per equipment', async () => {
+      await service.create(roomBody([{ equipmentId: projector.id, quantity: 1 }]), employee);
+
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
+      expect(prisma.reservation.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            equipments: { create: [{ equipmentId: projector.id, quantity: 1 }] },
+          }),
+        }),
+      );
+      expect(prisma.reservationEquipment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            equipmentId: { in: [projector.id] },
+            reservation: {
+              status: { in: [ReservationStatus.PENDING, ReservationStatus.APPROVED] },
+              endAt: { gt: slotStart },
+              startAt: { lt: slotEnd },
+            },
+          },
+        }),
+      );
+    });
+
+    it('rejects with 409 when a partially overlapping reservation already uses the stock', async () => {
+      prisma.reservationEquipment.findMany.mockResolvedValue([usage(1, 30 * 60_000, 90 * 60_000)]);
+
+      await expect(
+        service.create(roomBody([{ equipmentId: projector.id, quantity: 1 }]), employee),
+      ).rejects.toThrow('Équipement indisponible sur ce créneau : Vidéoprojecteur (0 disponible(s)).');
+      expect(prisma.reservation.create).not.toHaveBeenCalled();
+    });
+
+    it('tags the equipment 409 with a dedicated code so clients can tell it from a slot conflict', async () => {
+      prisma.reservationEquipment.findMany.mockResolvedValue([usage(1, 0, 60 * 60_000)]);
+
+      const error: unknown = await service
+        .create(roomBody([{ equipmentId: projector.id, quantity: 1 }]), employee)
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        statusCode: 409,
+        code: 'EQUIPMENT_UNAVAILABLE',
+      });
+    });
+
+    it('counts the peak of simultaneous usage, not the sum of disjoint reservations', async () => {
+      prisma.equipment.findMany.mockResolvedValue([{ ...projector, quantity: 2 }]);
+      prisma.reservationEquipment.findMany.mockResolvedValue([
+        usage(1, -30 * 60_000, 15 * 60_000),
+        usage(1, 30 * 60_000, 90 * 60_000),
+      ]);
+
+      await expect(
+        service.create(roomBody([{ equipmentId: projector.id, quantity: 1 }]), employee),
+      ).resolves.toMatchObject({ id: 'res-new' });
+    });
+
+    it('rejects with 400 an equipment reserved for vehicles', async () => {
+      prisma.equipment.findMany.mockResolvedValue([
+        { ...projector, id: 'eq-seat', name: 'Siège enfant', scope: EquipmentScope.VEHICLE },
+      ]);
+
+      await expect(
+        service.create(roomBody([{ equipmentId: 'eq-seat', quantity: 1 }]), employee),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects with 400 an equipment in maintenance', async () => {
+      prisma.equipment.findMany.mockResolvedValue([
+        { ...projector, status: ResourceStatus.MAINTENANCE },
+      ]);
+
+      await expect(
+        service.create(roomBody([{ equipmentId: projector.id, quantity: 1 }]), employee),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.reservation.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses an extension when an equipment is missing on the added period', async () => {
+      const owner = makeUser({ id: 'owner-1', role: Role.EMPLOYEE, companyId: 'company-a' });
+      prisma.reservation.findUnique.mockResolvedValue({
+        id: 'res-1',
+        companyId: 'company-a',
+        userId: 'owner-1',
+        directionId: null,
+        resourceType: ResourceType.ROOM,
+        vehicleId: null,
+        roomId: 'room-1',
+        startAt: slotStart,
+        endAt: slotEnd,
+        status: ReservationStatus.APPROVED,
+        equipments: [{ quantity: 1, equipment: { id: projector.id, name: projector.name } }],
+      });
+      prisma.meetingRoom.findUnique.mockResolvedValue({
+        status: ResourceStatus.AVAILABLE,
+        name: 'Salle Baobab',
+        company: { status: EntityStatus.ACTIVE },
+      });
+      prisma.reservationEquipment.findMany.mockResolvedValue([usage(1, 60 * 60_000, 120 * 60_000)]);
+
+      await expect(
+        service.extend(
+          'res-1',
+          { newEndAt: new Date(slotEnd.getTime() + 3_600_000).toISOString() },
+          owner,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.reservation.updateMany).not.toHaveBeenCalled();
+    });
+
+    describe('PUT /reservations/:id/equipments', () => {
+      const approved = {
+        id: 'res-1',
+        companyId: 'company-a',
+        userId: 'employee-1',
+        directionId: null,
+        resourceType: ResourceType.ROOM,
+        vehicleId: null,
+        roomId: 'room-1',
+        startAt: slotStart,
+        endAt: slotEnd,
+        status: ReservationStatus.APPROVED,
+        vehicle: null,
+        room: { name: 'Salle Baobab' },
+        equipments: [],
+      };
+
+      beforeEach(() => {
+        prisma.reservation.findUnique.mockResolvedValue(approved);
+        prisma.reservation.findUniqueOrThrow.mockResolvedValue({
+          ...approved,
+          equipments: [{ quantity: 1, equipment: { id: projector.id, name: projector.name } }],
+        });
+        prisma.user.findMany.mockResolvedValue([{ id: 'manager-1' }, { id: 'employee-1' }]);
+      });
+
+      it('lets the owner replace the equipments of an approved reservation, which stays approved', async () => {
+        const result = await service.replaceEquipments(
+          'res-1',
+          { equipments: [{ equipmentId: projector.id, quantity: 1 }] },
+          employee,
+        );
+
+        expect(result.status).toBe(ReservationStatus.APPROVED);
+        expect(prisma.reservation.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              id: 'res-1',
+              status: { in: [ReservationStatus.PENDING, ReservationStatus.APPROVED] },
+            }),
+          }),
+        );
+        expect(prisma.reservationEquipment.deleteMany).toHaveBeenCalledWith({
+          where: { reservationId: 'res-1' },
+        });
+        expect(prisma.reservationEquipment.createMany).toHaveBeenCalledWith({
+          data: [{ reservationId: 'res-1', equipmentId: projector.id, quantity: 1 }],
+        });
+        expect(prisma.reservationEquipment.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              reservation: expect.objectContaining({ id: { not: 'res-1' } }),
+            }),
+          }),
+        );
+        expect(audit.log).toHaveBeenCalledWith(
+          expect.objectContaining({
+            metadata: expect.objectContaining({
+              operation: 'EQUIPMENT_UPDATE',
+              before: [],
+              after: [{ equipmentId: projector.id, name: projector.name, quantity: 1 }],
+            }),
+          }),
+        );
+        expect(notifications.createManyForUsers).toHaveBeenCalledWith(
+          ['manager-1'],
+          expect.objectContaining({ type: NotificationType.RESERVATION_EQUIPMENT_UPDATED }),
+        );
+        expect(realtime.publishReservation).toHaveBeenCalledWith(
+          'reservation.updated',
+          expect.objectContaining({ id: 'res-1' }),
+          { availabilityChanged: false },
+        );
+      });
+
+      it('does not notify approvers for a pending reservation', async () => {
+        prisma.reservation.findUnique.mockResolvedValue({
+          ...approved,
+          status: ReservationStatus.PENDING,
+        });
+
+        await service.replaceEquipments('res-1', { equipments: [] }, employee);
+
+        expect(prisma.reservationEquipment.createMany).not.toHaveBeenCalled();
+        expect(notifications.createManyForUsers).not.toHaveBeenCalled();
+      });
+
+      it('forbids another employee', async () => {
+        const colleague = makeUser({ id: 'employee-2', role: Role.EMPLOYEE, companyId: 'company-a' });
+        prisma.reservation.findUnique.mockResolvedValue({ ...approved, userId: 'employee-2-other' });
+
+        await expect(
+          service.replaceEquipments('res-1', { equipments: [] }, colleague),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+        expect(prisma.reservationEquipment.deleteMany).not.toHaveBeenCalled();
+      });
+
+      it('refuses a reservation that has already started, whatever the role', async () => {
+        const admin = makeUser({ id: 'admin-1', role: Role.COMPANY_ADMIN, companyId: 'company-a' });
+        prisma.reservation.findUnique.mockResolvedValue({
+          ...approved,
+          startAt: new Date(Date.now() - 60_000),
+        });
+
+        await expect(
+          service.replaceEquipments('res-1', { equipments: [] }, admin),
+        ).rejects.toThrow(
+          'Impossible de modifier les équipements d’une réservation dont la date de début est passée.',
+        );
+        expect(prisma.reservation.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('rejects with 409 when the stock is insufficient', async () => {
+        prisma.reservationEquipment.findMany.mockResolvedValue([usage(1, 0, 60 * 60_000)]);
+
+        await expect(
+          service.replaceEquipments(
+            'res-1',
+            { equipments: [{ equipmentId: projector.id, quantity: 1 }] },
+            employee,
+          ),
+        ).rejects.toBeInstanceOf(ConflictException);
+        expect(prisma.reservationEquipment.deleteMany).not.toHaveBeenCalled();
+      });
     });
   });
 });

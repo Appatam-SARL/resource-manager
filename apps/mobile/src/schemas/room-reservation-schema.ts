@@ -3,6 +3,9 @@ import { z } from 'zod';
 const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
 const timeRegex = /^\d{2}:\d{2}$/;
 
+/** Mirrors the API technical bound on participantCount. */
+export const MAX_PARTICIPANT_COUNT = 1000;
+
 function compareDateTime(
   startDate: string,
   startTime: string,
@@ -27,10 +30,12 @@ export const roomReservationSchema = z
       .trim()
       .min(1, 'Objet de la réunion requis')
       .max(200, '200 caractères maximum'),
+    // Room capacity is indicative only: it does not limit the number of participants.
     participantCount: z
       .number({ error: 'Nombre de participants requis' })
       .int('Nombre entier requis')
-      .positive('Au moins 1 participant'),
+      .positive('Au moins 1 participant')
+      .max(MAX_PARTICIPANT_COUNT, `${MAX_PARTICIPANT_COUNT} participants maximum`),
     comment: z.string().max(1000, '1000 caractères maximum').optional(),
   })
   .superRefine((data, ctx) => {
@@ -44,14 +49,3 @@ export const roomReservationSchema = z
   });
 
 export type RoomReservationFormValues = z.infer<typeof roomReservationSchema>;
-
-export function validateParticipantCountAgainstCapacity(
-  participantCount: number,
-  capacity: number,
-): string | null {
-  if (participantCount < 1) return 'Au moins 1 participant';
-  if (participantCount > capacity) {
-    return `Le nombre de participants ne peut pas dépasser ${capacity}`;
-  }
-  return null;
-}

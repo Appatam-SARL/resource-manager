@@ -8,6 +8,7 @@ import {
   CircleCheck,
   CircleX,
   Ban,
+  Package,
   type LucideIcon,
 } from 'lucide-react';
 import type { StatusTone } from '@/lib/status';
@@ -20,6 +21,7 @@ const TYPE_CONFIG: Record<string, NotificationTypeConfig> = {
   RESERVATION_REJECTED: { icon: CircleX, tone: 'danger', label: 'Refusée' },
   RESERVATION_CANCELLED: { icon: Ban, tone: 'neutral', label: 'Annulée' },
   RESERVATION_EXTENDED: { icon: CalendarClock, tone: 'warning', label: 'Prolongée' },
+  RESERVATION_EQUIPMENT_UPDATED: { icon: Package, tone: 'info', label: 'Équipements modifiés' },
 };
 
 const FALLBACK_CONFIG: NotificationTypeConfig = { icon: Bell, tone: 'neutral', label: 'Notification' };

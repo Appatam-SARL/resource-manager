@@ -35,6 +35,7 @@ const RESERVATION_NOTIFICATION_TYPES: ReadonlySet<NotificationType> = new Set([
   NotificationType.RESERVATION_REJECTED,
   NotificationType.RESERVATION_CANCELLED,
   NotificationType.RESERVATION_EXTENDED,
+  NotificationType.RESERVATION_EQUIPMENT_UPDATED,
 ]);
 
 @Injectable()

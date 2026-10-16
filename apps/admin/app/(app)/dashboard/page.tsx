@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import Link from 'next/link';
-import { Boxes, CalendarDays, Clock3, History, Inbox } from 'lucide-react';
+import { Boxes, CalendarDays, Clock3, History, Inbox, Timer } from 'lucide-react';
 import { Stagger, StaggerItem, FadeIn } from '@/components/motion';
 import { PageHeader } from '@/components/shared/page-header';
 import { Panel } from '@/components/shared/panel';
@@ -11,14 +11,17 @@ import { StatCard } from '@/components/shared/stat-card';
 import { buttonVariants } from '@/components/ui/button';
 import {
   DashboardResources,
+  DashboardRoomUsageByDirection,
   DashboardToday,
   useDashboardReservations,
   useDashboardSummary,
   useDashboardTwoDays,
 } from '@/features/dashboard';
 import {
+  formatAverageDuration,
   formatDayDelta,
   formatLongDate,
+  formatRoomUsageHint,
   getGreeting,
   splitTodayAndYesterday,
 } from '@/features/dashboard/lib/dashboard';
@@ -56,6 +59,8 @@ export default function DashboardPage() {
     ? summary.resources.vehicles.available + summary.resources.rooms.available
     : 0;
   const pendingTotal = pendingQuery.data?.meta.total;
+  const roomUsage = summary?.roomUsage;
+  const canOpenRooms = canAccessRoute(user.role, '/rooms');
 
   return (
     <div className="space-y-6">
@@ -70,7 +75,7 @@ export default function DashboardPage() {
         }
       />
 
-      <Stagger className="grid gap-4 sm:grid-cols-3" delay={0.05}>
+      <Stagger className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" delay={0.05}>
         <StaggerItem>
           <StatCard
             label="Réservations aujourd’hui"
@@ -117,6 +122,16 @@ export default function DashboardPage() {
                 : 'Donnée indisponible'
             }
             href={canOpenResources ? '/vehicles' : undefined}
+          />
+        </StaggerItem>
+        <StaggerItem>
+          <StatCard
+            label="Temps moyen d’utilisation des salles"
+            icon={Timer}
+            loading={summaryQuery.isLoading}
+            value={roomUsage?.averageMinutes != null ? formatAverageDuration(roomUsage.averageMinutes) : '—'}
+            hint={roomUsage ? formatRoomUsageHint(roomUsage) : 'Donnée indisponible'}
+            href={canOpenRooms ? '/rooms' : undefined}
           />
         </StaggerItem>
       </Stagger>
@@ -191,7 +206,7 @@ export default function DashboardPage() {
             />
           </Panel>
         </div>
-        <div className="lg:col-span-2">
+        <div className="space-y-4 lg:col-span-2">
           {summaryQuery.isError ? (
             <Panel title="Ressources">
               <p className="text-sm text-muted-foreground" role="alert">
@@ -204,6 +219,13 @@ export default function DashboardPage() {
           ) : (
             <DashboardResources summary={summary} canOpenResources={canOpenResources} />
           )}
+          {!isEmployee && !summaryQuery.isError ? (
+            <DashboardRoomUsageByDirection
+              roomUsage={roomUsage}
+              loading={summaryQuery.isLoading}
+              showCompany={user.role === 'GROUP_ADMIN'}
+            />
+          ) : null}
         </div>
       </FadeIn>
     </div>

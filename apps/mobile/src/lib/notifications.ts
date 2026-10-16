@@ -86,7 +86,7 @@ export async function configureNotificationHandling(): Promise<void> {
       }),
       Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.general, {
         name: 'Général',
-        description: 'Informations générales de Resource Manager.',
+        description: 'Informations générales de SUZANG HUB.',
         importance: Notifications.AndroidImportance.DEFAULT,
         sound: 'default',
       }),

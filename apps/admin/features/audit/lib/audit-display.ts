@@ -12,9 +12,11 @@ export const AUDIT_ENTITY_LABELS: Record<string, string> = {
   Company: 'Entreprise',
   Direction: 'Direction',
   Group: 'Groupe',
+  Equipment: 'Équipement',
 };
 
 const ENTITY_ROUTES: Record<string, (id: string) => string> = {
+  Equipment: (id) => `/equipments/${id}`,
   Reservation: (id) => `/reservations/${id}`,
   Vehicle: (id) => `/vehicles/${id}`,
   MeetingRoom: (id) => `/rooms/${id}`,
@@ -67,6 +69,10 @@ const FIELD_LABELS: Record<string, string> = {
   comment: 'Commentaire',
   reason: 'Raison',
   operation: 'Opération',
+  quantity: 'Quantité',
+  scope: 'Périmètre',
+  equipments: 'Équipements',
+  fixedEquipment: 'Équipements fixes',
 };
 
 /** Technical keys never shown to the reader (identifiers, timestamps, nested objects). */
@@ -75,7 +81,31 @@ const HIDDEN_KEYS = new Set(['id', 'createdAt', 'updatedAt', 'passwordHash', 'be
 const VALUE_LABELS: Record<string, string> = {
   soft_deactivate_has_reservations: 'Mise hors service automatique (réservations existantes)',
   EXTEND: 'Prolongation',
+  EQUIPMENT_UPDATE: 'Modification des équipements',
 };
+
+const EQUIPMENT_SCOPE_AUDIT_LABELS: Record<string, string> = {
+  ROOM: 'Salles',
+  VEHICLE: 'Véhicules',
+  BOTH: 'Les deux',
+};
+
+/** `[{ name, quantity }]` snapshots written for reservation equipments, as "Vidéoprojecteur × 1, Micro × 2". */
+export function formatEquipmentSnapshot(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  if (value.length === 0) return 'Aucun';
+  const parts: string[] = [];
+  for (const item of value) {
+    if (typeof item === 'string') {
+      parts.push(item);
+    } else if (isRecord(item) && typeof item.name === 'string' && typeof item.quantity === 'number') {
+      parts.push(`${item.name} × ${item.quantity}`);
+    } else {
+      return null;
+    }
+  }
+  return parts.join(', ');
+}
 
 export type AuditDetailEntry = { key: string; label: string; value: string };
 export type AuditChange = { key: string; label: string; before: string; after: string };
@@ -116,7 +146,9 @@ export function formatAuditValue(key: string, value: unknown): string | null {
   if (value === null || value === undefined || value === '') return '—';
   if (typeof value === 'boolean') return value ? 'Oui' : 'Non';
   if (typeof value === 'number') return String(value);
+  if (Array.isArray(value)) return formatEquipmentSnapshot(value);
   if (typeof value !== 'string') return null;
+  if (key === 'scope' && value in EQUIPMENT_SCOPE_AUDIT_LABELS) return EQUIPMENT_SCOPE_AUDIT_LABELS[value]!;
   if (key === 'role' && value in ROLE_LABELS) return ROLE_LABELS[value as Role];
   if (key === 'resourceType' && value in RESOURCE_TYPE_LABELS) {
     return RESOURCE_TYPE_LABELS[value as keyof typeof RESOURCE_TYPE_LABELS];
@@ -182,6 +214,10 @@ export function summarizeAuditLog(log: Pick<AuditLog, 'action' | 'metadata'>): s
   }
   if (metadata.operation === 'EXTEND' && typeof metadata.newEndAt === 'string') {
     return `Prolongée jusqu’au ${formatDateTime(metadata.newEndAt)}`;
+  }
+  if (metadata.operation === 'EQUIPMENT_UPDATE') {
+    const after = formatEquipmentSnapshot(metadata.after);
+    return after ? `Équipements : ${after}` : 'Équipements modifiés';
   }
   if (isSnapshotUpdate(log.metadata)) {
     const changes = auditChanges(log.metadata);

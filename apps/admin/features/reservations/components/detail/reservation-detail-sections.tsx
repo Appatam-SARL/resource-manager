@@ -2,7 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { format, isValid, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { ArrowRight, Building2, Mail, Network } from 'lucide-react';
+import { ArrowRight, Building2, Mail, Network, Package } from 'lucide-react';
 import type { Reservation } from '@resource-manager/types';
 import { Panel } from '@/components/shared/panel';
 import { ResourceTypeIcon } from '@/components/shared/resource-type-icon';
@@ -160,6 +160,29 @@ export function ReservationResourcePanel({
           {resourceStatus ? <StatusBadge status={resourceStatus} className="mt-1" /> : null}
         </div>
       </div>
+    </Panel>
+  );
+}
+
+export function ReservationEquipmentsPanel({ reservation }: { reservation: Reservation }) {
+  const equipments = reservation.equipments ?? [];
+  return (
+    <Panel title="Équipements demandés">
+      {equipments.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Aucun équipement demandé.</p>
+      ) : (
+        <ul className="divide-y divide-border">
+          {equipments.map((item) => (
+            <li key={item.equipment.id} className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
+              <span className="flex min-w-0 items-center gap-2 text-sm text-foreground">
+                <Package className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="truncate">{item.equipment.name}</span>
+              </span>
+              <span className="shrink-0 text-sm font-medium text-foreground tabular-nums">× {item.quantity}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </Panel>
   );
 }

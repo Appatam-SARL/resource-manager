@@ -12,17 +12,22 @@ export function useReservationSubmission() {
   const createMutation = useCreateReservation();
   const [submitError, setSubmitError] = useState<ReservationSubmitError | null>(null);
 
-  const submit = async (body: CreateReservationBody): Promise<Reservation | null> => {
+  const submit = async (
+    body: CreateReservationBody,
+  ): Promise<{ reservation: Reservation; error: null } | { reservation: null; error: ReservationSubmitError }> => {
     setSubmitError(null);
     try {
-      return await createMutation.mutateAsync(body);
+      return { reservation: await createMutation.mutateAsync(body), error: null };
     } catch (error) {
       const mapped = getReservationSubmitError(error);
       setSubmitError(mapped);
       if (mapped.kind === 'conflict') {
         void queryClient.invalidateQueries({ queryKey: ['availability'] });
       }
-      return null;
+      if (mapped.kind === 'equipment') {
+        void queryClient.invalidateQueries({ queryKey: ['equipment-availability'] });
+      }
+      return { reservation: null, error: mapped };
     }
   };
 

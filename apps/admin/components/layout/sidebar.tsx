@@ -6,6 +6,7 @@ import { ChevronsUpDown, LayoutDashboard } from 'lucide-react';
 import { getNavSections, isActivePath, NAV_ICONS } from '@/components/layout/navigation';
 import { useSidebar } from '@/components/layout/sidebar-context';
 import { UserMenu } from '@/components/layout/user-menu';
+import { BrandLogo } from '@/components/shared/brand-logo';
 import { UserAvatar } from '@/components/shared/user-avatar';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -19,22 +20,12 @@ function Brand({ iconOnly }: { iconOnly: boolean }) {
     <Link
       href="/dashboard"
       className={cn(
-        'flex h-14 shrink-0 items-center gap-2.5 rounded-md focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
+        'flex h-14 shrink-0 items-center rounded-md focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
         iconOnly ? 'justify-center' : 'px-2',
       )}
-      aria-label="Resource Manager — Tableau de bord"
+      aria-label="SUZANG HUB — Tableau de bord"
     >
-      <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary text-[11px] font-semibold tracking-wide text-primary-foreground">
-        RM
-      </span>
-      {iconOnly ? null : (
-        <span className="min-w-0 leading-tight">
-          <span className="block truncate text-[13px] font-semibold tracking-tight text-foreground">
-            Resource Manager
-          </span>
-          <span className="block truncate text-[11px] text-muted-foreground">Administration</span>
-        </span>
-      )}
+      <BrandLogo iconOnly={iconOnly} height={iconOnly ? 32 : 36} priority />
     </Link>
   );
 }

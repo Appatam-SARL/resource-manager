@@ -3,6 +3,8 @@ import { compare, hash } from 'bcryptjs';
 
 /** bcrypt ignores everything after 72 bytes: longer passwords are refused, never truncated. */
 export const PASSWORD_MAX_BYTES = 72;
+export const PASSWORD_MIN_LENGTH = 8;
+export const PASSWORD_MAX_LENGTH = 72;
 const BCRYPT_COST = 12;
 
 @Injectable()

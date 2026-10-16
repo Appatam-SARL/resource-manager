@@ -22,7 +22,7 @@ export const HomeActivityRow = memo(function HomeActivityRow({
   onPress: (id: string) => void;
 }) {
   const { item } = entry;
-  const status = item.reservation.status;
+  const status = item.displayStatus;
   const StatusIcon = STATUS_ICONS[status];
   const tone = statusColor(status);
 

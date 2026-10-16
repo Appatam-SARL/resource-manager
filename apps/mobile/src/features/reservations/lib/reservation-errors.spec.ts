@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AppError } from '@/lib/errors';
+import { AppError, EQUIPMENT_UNAVAILABLE_CODE } from '@/lib/errors';
 import { CONFLICT_MESSAGE, getReservationSubmitError } from './reservation-errors';
 
 describe('getReservationSubmitError', () => {
@@ -7,6 +7,14 @@ describe('getReservationSubmitError', () => {
     expect(getReservationSubmitError(new AppError('ConflictException', 409))).toEqual({
       kind: 'conflict',
       message: CONFLICT_MESSAGE,
+    });
+  });
+
+  it('keeps the server message when the 409 comes from a requested equipment', () => {
+    const message = 'Équipement indisponible sur ce créneau : Vidéoprojecteur (0 disponible(s)).';
+    expect(getReservationSubmitError(new AppError(message, 409, EQUIPMENT_UNAVAILABLE_CODE))).toEqual({
+      kind: 'equipment',
+      message,
     });
   });
 

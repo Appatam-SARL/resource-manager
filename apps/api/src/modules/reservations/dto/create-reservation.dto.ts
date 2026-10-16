@@ -2,16 +2,29 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ResourceType } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayUnique,
+  IsArray,
   IsDateString,
   IsEnum,
   IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
+import {
+  equipmentItemKey,
+  MAX_EQUIPMENT_LINES,
+  ReservationEquipmentItemDto,
+} from '../../equipments/dto/reservation-equipment-item.dto.js';
+
+/** Technical upper bound only: room capacity is indicative and does not limit participants. */
+export const MAX_PARTICIPANT_COUNT = 1000;
 
 export class CreateReservationDto {
   @ApiProperty({ enum: ResourceType })
@@ -70,11 +83,17 @@ export class CreateReservationDto {
   @MaxLength(200)
   meetingSubject?: string;
 
-  @ApiPropertyOptional({ description: 'Requis pour une salle', minimum: 1 })
+  @ApiPropertyOptional({
+    description:
+      'Requis pour une salle. La capacité de la salle est indicative et ne limite pas ce nombre.',
+    minimum: 1,
+    maximum: MAX_PARTICIPANT_COUNT,
+  })
   @ValidateIf((o: CreateReservationDto) => o.resourceType === ResourceType.ROOM)
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(MAX_PARTICIPANT_COUNT)
   participantCount?: number;
 
   @ApiPropertyOptional()
@@ -82,4 +101,20 @@ export class CreateReservationDto {
   @IsString()
   @MaxLength(1000)
   comment?: string;
+
+  @ApiPropertyOptional({
+    type: [ReservationEquipmentItemDto],
+    maxItems: MAX_EQUIPMENT_LINES,
+    description:
+      'Équipements du catalogue Groupe (compatibles avec le type de ressource), stock vérifié sur le créneau.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_EQUIPMENT_LINES)
+  @ArrayUnique(equipmentItemKey, {
+    message: 'Chaque équipement ne peut figurer qu’une seule fois.',
+  })
+  @ValidateNested({ each: true })
+  @Type(() => ReservationEquipmentItemDto)
+  equipments?: ReservationEquipmentItemDto[];
 }

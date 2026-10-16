@@ -4,7 +4,7 @@ import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Leaf, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ApiError } from '@resource-manager/api-client';
 import {
@@ -12,6 +12,7 @@ import {
   type LoginFormValues,
 } from '@/features/auth/schemas/login-schema';
 import { useAuth } from '@/providers/auth-provider';
+import { BrandLogo } from '@/components/shared/brand-logo';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -80,16 +81,14 @@ function LoginForm() {
     <Card className="w-full [--card-spacing:--spacing(6)]">
       <CardHeader className="items-center text-center">
         <motion.div
-          className="mb-3 flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm"
-          initial={reduceMotion ? false : { rotate: -12, opacity: 0 }}
-          animate={{ rotate: 0, opacity: 1 }}
-          transition={{ delay: 0.15, type: 'spring', stiffness: 200 }}
+          className="mb-2 flex justify-center"
+          initial={reduceMotion ? false : { opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1, type: 'spring', stiffness: 200 }}
         >
-          <Leaf className="size-7" aria-hidden />
+          <BrandLogo height={56} priority className="mx-auto" />
         </motion.div>
-        <CardTitle className="text-2xl font-semibold tracking-tight text-primary">
-          Resource Manager
-        </CardTitle>
+        <CardTitle className="sr-only">SUZANG HUB</CardTitle>
         <CardDescription className="text-sm">
           Connectez-vous à l’espace d’administration
         </CardDescription>

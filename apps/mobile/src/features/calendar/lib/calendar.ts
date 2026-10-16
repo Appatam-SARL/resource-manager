@@ -13,6 +13,7 @@ import {
 } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import type { CalendarEvent, ReservationStatus, ResourceType } from '@resource-manager/types';
+import { getDisplayStatus } from '@/features/reservations/lib/reservation-status';
 import { parseApiDate } from '@/lib/format';
 
 const WEEK_OPTIONS = { weekStartsOn: 1 } as const;
@@ -101,11 +102,19 @@ export const DEFAULT_CALENDAR_FILTERS: CalendarFiltersValue = { resourceType: nu
 /** The calendar endpoint only returns these statuses (rejected / cancelled never block a slot). */
 export const CALENDAR_STATUSES: ReservationStatus[] = ['PENDING', 'APPROVED', 'COMPLETED'];
 
-export function applyCalendarFilters(events: CalendarEvent[], filters: CalendarFiltersValue): CalendarEvent[] {
+export function getEventDisplayStatus(event: Pick<CalendarEvent, 'status' | 'end'>, now: Date): ReservationStatus {
+  return getDisplayStatus({ status: event.status, endAt: event.end }, now);
+}
+
+export function applyCalendarFilters(
+  events: CalendarEvent[],
+  filters: CalendarFiltersValue,
+  now: Date,
+): CalendarEvent[] {
   return events.filter(
     (event) =>
       (!filters.resourceType || event.resourceType === filters.resourceType) &&
-      (!filters.status || event.status === filters.status),
+      (!filters.status || getEventDisplayStatus(event, now) === filters.status),
   );
 }
 
@@ -142,6 +151,7 @@ export type AgendaEventRow = {
   inProgress: boolean;
   isNext: boolean;
   minutesLeft: number;
+  displayStatus: ReservationStatus;
 };
 
 export type AgendaNowRow = { kind: 'now'; key: 'now'; label: string };
@@ -208,6 +218,7 @@ export function buildDayAgenda(events: CalendarEvent[], day: Date, now: Date): A
       inProgress,
       isNext,
       minutesLeft: inProgress ? Math.ceil((end.getTime() - now.getTime()) / 60_000) : 0,
+      displayStatus: getEventDisplayStatus(event, now),
     });
   }
 

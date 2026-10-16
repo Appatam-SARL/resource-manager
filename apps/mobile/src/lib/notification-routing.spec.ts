@@ -41,6 +41,7 @@ describe('getNotificationRoute', () => {
     'RESERVATION_REJECTED',
     'RESERVATION_CANCELLED',
     'RESERVATION_EXTENDED',
+    'RESERVATION_EQUIPMENT_UPDATED',
   ])('ouvre la réservation pour %s', (type) => {
     expect(getNotificationRoute({ type, reservationId: 'cmg123abc' })).toBe(
       '/(app)/reservations/cmg123abc',

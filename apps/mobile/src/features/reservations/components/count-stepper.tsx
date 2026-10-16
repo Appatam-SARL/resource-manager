@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { AlertCircle, Minus, Plus, Users } from 'lucide-react-native';
 import { pluralize } from '@/features/reservations/lib/schedule';
 import { colors, radius, spacing } from '@/constants/theme';
@@ -10,7 +11,14 @@ type CountStepperProps = {
   unit: { singular: string; plural: string };
   /** Real capacity of the selected resource; unknown until a resource is picked. */
   max?: number;
+  /**
+   * true (default): `max` is a hard limit (vehicle seats).
+   * false: `max` is indicative only (room capacity); exceeding it shows a non-blocking warning.
+   */
+  enforceMax?: boolean;
   capacityLabel?: string;
+  /** Warning shown when `enforceMax` is false and the value exceeds `max`. */
+  overCapacityWarning?: string;
   /** e.g. "Sélectionnez un véhicule pour connaître sa capacité." */
   missingCapacityHint: string;
   showRemaining?: boolean;
@@ -19,6 +27,8 @@ type CountStepperProps = {
 
 const MIN = 1;
 const MAX_WITHOUT_CAPACITY = 99;
+/** Technical bound when capacity is indicative; mirrors the API limit on participantCount. */
+const MAX_UNENFORCED = 1000;
 
 export function CountStepper({
   label,
@@ -26,42 +36,69 @@ export function CountStepper({
   onChange,
   unit,
   max,
+  enforceMax = true,
   capacityLabel,
+  overCapacityWarning,
   missingCapacityHint,
   showRemaining = false,
   error,
 }: CountStepperProps) {
-  const upperBound = max ?? MAX_WITHOUT_CAPACITY;
+  /** Text being typed; null when the field is not being edited. */
+  const [draft, setDraft] = useState<string | null>(null);
+
+  const upperBound = enforceMax ? (max ?? MAX_WITHOUT_CAPACITY) : MAX_UNENFORCED;
   const canDecrement = value > MIN;
   const canIncrement = value < upperBound;
-  const overCapacity = max !== undefined && value > max;
+  const exceedsCapacity = max !== undefined && value > max;
+  const overCapacityError = enforceMax && exceedsCapacity;
+  const overCapacityNotice = !enforceMax && exceedsCapacity;
   const remaining = max !== undefined ? max - value : null;
 
-  const setValue = (next: number) => onChange(Math.min(Math.max(next, MIN), upperBound));
+  const clamp = (next: number) => Math.min(Math.max(next, MIN), upperBound);
+  const setValue = (next: number) => onChange(clamp(next));
+
+  const changeText = (text: string) => {
+    const digits = text.replace(/\D/g, '').slice(0, String(upperBound).length);
+    if (!digits) {
+      setDraft('');
+      return;
+    }
+    const next = clamp(Number.parseInt(digits, 10));
+    setDraft(String(next) === digits ? digits : String(next));
+    onChange(next);
+  };
+
+  const showError = Boolean(error) || overCapacityError;
 
   return (
     <View style={styles.wrapper}>
       <Text style={styles.label}>{label}</Text>
-      <View style={[styles.control, (overCapacity || error) && styles.controlError]}>
+      <View
+        style={[
+          styles.control,
+          showError ? styles.controlError : overCapacityNotice && styles.controlWarning,
+        ]}
+      >
         <StepButton
           icon="minus"
           label={`Retirer un ${unit.singular}`}
           disabled={!canDecrement}
           onPress={() => setValue(value - 1)}
         />
-        <View
-          style={styles.valueBox}
-          accessible
-          accessibilityRole="adjustable"
-          accessibilityLabel={label}
-          accessibilityValue={{ min: MIN, max: upperBound, now: value, text: pluralize(value, unit.singular, unit.plural) }}
-          accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
-          onAccessibilityAction={(event) => {
-            if (event.nativeEvent.actionName === 'increment' && canIncrement) setValue(value + 1);
-            if (event.nativeEvent.actionName === 'decrement' && canDecrement) setValue(value - 1);
-          }}
-        >
-          <Text style={styles.value}>{value}</Text>
+        <View style={styles.valueBox}>
+          <TextInput
+            style={styles.value}
+            value={draft ?? String(value)}
+            onChangeText={changeText}
+            onFocus={() => setDraft(String(value))}
+            onBlur={() => setDraft(null)}
+            keyboardType="number-pad"
+            returnKeyType="done"
+            selectTextOnFocus
+            maxLength={String(upperBound).length}
+            accessibilityLabel={label}
+            accessibilityHint={`Saisissez le nombre de ${unit.plural}`}
+          />
           <Text style={styles.unit}>{value > 1 ? unit.plural : unit.singular}</Text>
         </View>
         <StepButton
@@ -72,11 +109,18 @@ export function CountStepper({
         />
       </View>
 
-      {error || overCapacity ? (
+      {showError ? (
         <View style={styles.hintRow} accessibilityRole="alert">
           <AlertCircle size={14} color={colors.danger} />
           <Text style={styles.errorText}>
             {error ?? `Dépasse la capacité (${capacityLabel ?? max}).`}
+          </Text>
+        </View>
+      ) : overCapacityNotice ? (
+        <View style={styles.hintRow} accessibilityRole="alert">
+          <AlertCircle size={14} color={colors.warning} />
+          <Text style={styles.warningText}>
+            {overCapacityWarning ?? `Dépasse la capacité indiquée (${max}).`}
           </Text>
         </View>
       ) : (
@@ -148,6 +192,9 @@ const styles = StyleSheet.create({
   controlError: {
     borderColor: colors.danger,
   },
+  controlWarning: {
+    borderColor: colors.warning,
+  },
   stepButton: {
     width: 48,
     height: 48,
@@ -167,6 +214,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   value: {
+    minWidth: 64,
+    paddingVertical: 0,
+    textAlign: 'center',
     fontSize: 28,
     fontWeight: '800',
     color: colors.text,
@@ -191,5 +241,10 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     color: colors.danger,
+  },
+  warningText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.warning,
   },
 });

@@ -94,6 +94,25 @@ export default function RoomDetailPage({ params }: PageProps) {
                   <dd className="text-sm text-foreground">{room.capacity} personnes</dd>
                 </div>
                 <div className="sm:col-span-2">
+                  <dt className="text-xs font-medium text-muted-foreground">Équipements fixes</dt>
+                  <dd className="mt-1">
+                    {room.fixedEquipment.length > 0 ? (
+                      <ul className="flex flex-wrap gap-1.5">
+                        {room.fixedEquipment.map((label) => (
+                          <li
+                            key={label}
+                            className="inline-flex h-6 items-center rounded-md bg-secondary px-2 text-xs font-medium text-foreground ring-1 ring-border"
+                          >
+                            {label}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <span className="text-sm text-foreground">—</span>
+                    )}
+                  </dd>
+                </div>
+                <div className="sm:col-span-2">
                   <dt className="text-xs font-medium text-muted-foreground">Description</dt>
                   <dd className="text-sm whitespace-pre-line text-foreground">{room.description || '—'}</dd>
                 </div>

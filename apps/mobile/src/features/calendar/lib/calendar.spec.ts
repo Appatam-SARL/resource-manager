@@ -93,9 +93,18 @@ describe('filters and day counts', () => {
   ];
 
   it('filters by type and status', () => {
-    expect(applyCalendarFilters(events, { resourceType: 'ROOM', status: null }).map((e) => e.id)).toEqual(['e2']);
-    expect(applyCalendarFilters(events, { resourceType: null, status: 'PENDING' }).map((e) => e.id)).toEqual(['e2']);
-    expect(applyCalendarFilters(events, { resourceType: null, status: null })).toHaveLength(3);
+    expect(applyCalendarFilters(events, { resourceType: 'ROOM', status: null }, now).map((e) => e.id)).toEqual(['e2']);
+    expect(applyCalendarFilters(events, { resourceType: null, status: 'PENDING' }, now).map((e) => e.id)).toEqual(['e2']);
+    expect(applyCalendarFilters(events, { resourceType: null, status: null }, now)).toHaveLength(3);
+  });
+
+  it('files an ended APPROVED reservation under "Terminée", not "Approuvée"', () => {
+    const ended = makeEvent({ id: 'ended', status: 'APPROVED', start: at(8, 28, 7), end: at(8, 28, 9) });
+    expect(applyCalendarFilters([ended], { resourceType: null, status: 'COMPLETED' }, now)).toHaveLength(1);
+    expect(applyCalendarFilters([ended], { resourceType: null, status: 'APPROVED' }, now)).toHaveLength(0);
+
+    const [row] = eventRows(buildDayAgenda([ended], now, now));
+    expect(row?.displayStatus).toBe('COMPLETED');
   });
 
   it('counts multi-day reservations on every day they cover', () => {

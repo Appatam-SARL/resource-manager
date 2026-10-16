@@ -1,11 +1,12 @@
-import { useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
-import { Redirect, router } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { getBaseUrl } from '@/api/client';
 import { getLoginErrorMessage, useAuth } from '@/features/auth/auth-provider';
 import { loginSchema, type LoginFormValues } from '@/schemas/login-schema';
+import { BrandLogo } from '@/components/brand-logo';
 import { Screen } from '@/components/ui/Screen';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -19,17 +20,27 @@ export default function LoginScreen() {
   const [submitting, setSubmitting] = useState(false);
   const apiUrl = getBaseUrl();
 
+  const { email: emailFromReset } = useLocalSearchParams<{ email?: string }>();
+
   const {
     control,
     handleSubmit,
+    getValues,
+    setValue,
     formState: { errors },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      email: 'employee@appatam.dev',
-      password: 'Password123!',
+      email: '',
+      password: '',
     },
   });
+
+  useEffect(() => {
+    if (!emailFromReset) return;
+    setValue('email', emailFromReset);
+    setValue('password', '');
+  }, [emailFromReset, setValue]);
 
   if (authLoading) {
     return <LoadingState fullScreen />;
@@ -61,7 +72,8 @@ export default function LoginScreen() {
         entering={FadeInUp.duration(400).reduceMotion(ReduceMotion.System)}
         style={styles.hero}
       >
-        <Text style={styles.brand}>Resource Manager</Text>
+        <BrandLogo size={64} rim style={styles.brandMark} />
+        <Text style={styles.brand}>SUZANG HUB</Text>
         <Text style={styles.welcome}>Bienvenue</Text>
         <Text style={styles.subtitle}>
           Connectez-vous pour gérer vos réservations de véhicules et de salles.
@@ -96,6 +108,7 @@ export default function LoginScreen() {
             <Input
               label="Mot de passe"
               secureTextEntry
+              passwordToggle
               autoComplete="password"
               textContentType="password"
               value={value}
@@ -106,6 +119,21 @@ export default function LoginScreen() {
             />
           )}
         />
+
+        <Pressable
+          accessibilityRole="link"
+          accessibilityHint="Ouvre l’écran de réinitialisation du mot de passe"
+          hitSlop={8}
+          onPress={() =>
+            router.push({
+              pathname: '/(auth)/forgot-password',
+              params: { email: getValues('email').trim() },
+            })
+          }
+          style={({ pressed }) => [styles.forgotLink, pressed && styles.forgotLinkPressed]}
+        >
+          <Text style={styles.forgotLinkText}>Mot de passe oublié ?</Text>
+        </Pressable>
 
         <Button
           title="Se connecter"
@@ -135,6 +163,9 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: radius.xl,
     gap: spacing.sm,
   },
+  brandMark: {
+    marginBottom: spacing.sm,
+  },
   brand: {
     fontSize: 28,
     fontWeight: '800',
@@ -161,6 +192,19 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  forgotLink: {
+    alignSelf: 'flex-end',
+    marginTop: -spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  forgotLinkPressed: {
+    opacity: 0.6,
+  },
+  forgotLinkText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
   },
   devHint: {
     fontSize: 11,

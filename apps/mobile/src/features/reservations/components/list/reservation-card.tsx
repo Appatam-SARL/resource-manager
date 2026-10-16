@@ -53,7 +53,7 @@ export const ReservationCard = memo(function ReservationCard({ item, onPress }: 
     item.when,
     item.context?.text,
     item.requesterName ? `Demandée par ${item.requesterName}` : null,
-    `Statut : ${RESERVATION_STATUS_LABELS[reservation.status]}`,
+    `Statut : ${RESERVATION_STATUS_LABELS[item.displayStatus]}`,
   ]
     .filter(Boolean)
     .join(', ');
@@ -78,7 +78,7 @@ export const ReservationCard = memo(function ReservationCard({ item, onPress }: 
             <Text style={styles.type}>{item.typeLabel.toUpperCase()}</Text>
           )}
         </View>
-        <ReservationStatusBadge status={reservation.status} />
+        <ReservationStatusBadge status={item.displayStatus} />
       </View>
 
       <View style={styles.body}>

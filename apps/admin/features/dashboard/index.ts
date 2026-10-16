@@ -6,3 +6,4 @@ export {
 } from './hooks/use-dashboard';
 export { DashboardToday } from './components/dashboard-today';
 export { DashboardResources } from './components/dashboard-resources';
+export { DashboardRoomUsageByDirection } from './components/dashboard-room-usage-by-direction';

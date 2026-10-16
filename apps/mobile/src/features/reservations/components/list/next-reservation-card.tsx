@@ -17,7 +17,7 @@ export function NextReservationCard({ item, now, onPress }: NextReservationCardP
   const Icon = reservation.resourceType === 'VEHICLE' ? Car : DoorOpen;
   const ContextIcon = item.context?.kind === 'destination' ? MapPin : Presentation;
   const countdown = `Dans ${formatDistanceStrict(parseApiDate(reservation.startAt), now, { locale: fr })}`;
-  const statusLabel = RESERVATION_STATUS_LABELS[reservation.status];
+  const statusLabel = RESERVATION_STATUS_LABELS[item.displayStatus];
 
   return (
     <Pressable

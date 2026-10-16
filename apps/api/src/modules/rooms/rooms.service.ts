@@ -16,6 +16,7 @@ import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js
 import { AuditService } from '../audit/audit.service.js';
 import { RealtimeService } from '../realtime/realtime.service.js';
 import { CreateRoomDto } from './dto/create-room.dto.js';
+import { normalizeFixedEquipment } from './dto/fixed-equipment.js';
 import { ListRoomsQueryDto } from './dto/list-rooms-query.dto.js';
 import { UpdateRoomDto } from './dto/update-room.dto.js';
 
@@ -27,6 +28,7 @@ const roomSelect = {
   capacity: true,
   status: true,
   description: true,
+  fixedEquipment: true,
   createdAt: true,
   updatedAt: true,
   company: { select: { id: true, name: true } },
@@ -45,6 +47,9 @@ export class RoomsService {
     const where: Prisma.MeetingRoomWhereInput = {
       ...this.accessScope.resourceListWhere(actor, query.scope, query.companyId),
       ...(query.status ? { status: query.status } : {}),
+      ...(query.fixedEquipment?.length
+        ? { fixedEquipment: { hasEvery: query.fixedEquipment } }
+        : {}),
       ...(query.search
         ? {
             OR: [
@@ -91,6 +96,7 @@ export class RoomsService {
         location: dto.location?.trim() || null,
         capacity: dto.capacity,
         description: dto.description?.trim() || null,
+        fixedEquipment: normalizeFixedEquipment(dto.fixedEquipment ?? []),
       },
       select: roomSelect,
     });
@@ -121,6 +127,9 @@ export class RoomsService {
         ...(dto.capacity !== undefined ? { capacity: dto.capacity } : {}),
         ...(dto.description !== undefined
           ? { description: dto.description?.trim() || null }
+          : {}),
+        ...(dto.fixedEquipment !== undefined
+          ? { fixedEquipment: normalizeFixedEquipment(dto.fixedEquipment) }
           : {}),
       },
       select: roomSelect,

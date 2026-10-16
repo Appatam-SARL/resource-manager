@@ -11,6 +11,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/providers/auth-provider';
+import { FixedEquipmentField } from '@/features/rooms/components/fixed-equipment-field';
 import {
   roomFormSchema,
   type RoomFormValues,
@@ -43,6 +44,7 @@ export function RoomForm({
       location: initial?.location ?? '',
       capacity: initial?.capacity ?? 10,
       description: initial?.description ?? '',
+      fixedEquipment: initial?.fixedEquipment ?? [],
     },
   });
   const { errors, isDirty } = form.formState;
@@ -87,7 +89,7 @@ export function RoomForm({
           <FormField label="Localisation" htmlFor="location" error={errors.location?.message} hint="Bâtiment, étage…">
             <Input id="location" placeholder="Siège — 2ᵉ étage" {...form.register('location')} />
           </FormField>
-          <FormField label="Capacité" htmlFor="capacity" error={errors.capacity?.message} hint="Nombre maximal de participants." required>
+          <FormField label="Capacité" htmlFor="capacity" error={errors.capacity?.message} hint="Nombre de places indicatif : une réservation peut le dépasser." required>
             <Input
               id="capacity"
               type="number"
@@ -99,7 +101,33 @@ export function RoomForm({
           </FormField>
         </FormSection>
 
-        <FormSection title="Description" description="Équipements disponibles, consignes… (facultatif)">
+        <FormSection
+          title="Équipements fixes"
+          description="Équipements installés en permanence dans la salle, affichés et filtrables à la réservation. Les équipements empruntables se gèrent dans le catalogue « Équipements »."
+        >
+          <FormField
+            label="Équipements fixes"
+            htmlFor="fixedEquipment"
+            error={errors.fixedEquipment?.message}
+            hint="Appuyez sur Entrée pour ajouter un libellé (60 caractères maximum, 20 libellés au plus)."
+            wide
+          >
+            <Controller
+              control={form.control}
+              name="fixedEquipment"
+              render={({ field }) => (
+                <FixedEquipmentField
+                  id="fixedEquipment"
+                  value={field.value}
+                  onChange={field.onChange}
+                  invalid={Boolean(errors.fixedEquipment)}
+                />
+              )}
+            />
+          </FormField>
+        </FormSection>
+
+        <FormSection title="Description" description="Consignes, accès… (facultatif)">
           <FormField label="Description" htmlFor="description" error={errors.description?.message} wide>
             <Textarea id="description" rows={4} {...form.register('description')} />
           </FormField>

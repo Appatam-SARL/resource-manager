@@ -17,6 +17,7 @@ import {
   CheckCheck,
   CircleCheck,
   CircleX,
+  Package,
   TimerReset,
   WifiOff,
   type LucideIcon,
@@ -46,6 +47,7 @@ const TYPE_VISUALS: Record<string, TypeVisual> = {
   RESERVATION_REJECTED: { Icon: CircleX, color: colors.danger, background: '#FEE2E2' },
   RESERVATION_CANCELLED: { Icon: Ban, color: colors.warning, background: '#FEF3C7' },
   RESERVATION_EXTENDED: { Icon: TimerReset, color: colors.primary, background: colors.primaryMuted },
+  RESERVATION_EQUIPMENT_UPDATED: { Icon: Package, color: colors.primary, background: colors.primaryMuted },
 };
 const DEFAULT_VISUAL: TypeVisual = {
   Icon: Bell,

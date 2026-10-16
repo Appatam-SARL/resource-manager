@@ -18,7 +18,7 @@ export function HomeHeroCard({ highlight, onPress }: HomeHeroCardProps) {
   const Icon = reservation.resourceType === 'VEHICLE' ? Car : DoorOpen;
   const ContextIcon = item.context?.kind === 'destination' ? MapPin : Presentation;
   const countdown = formatHighlightCountdown(highlight);
-  const statusLabel = RESERVATION_STATUS_LABELS[reservation.status];
+  const statusLabel = RESERVATION_STATUS_LABELS[item.displayStatus];
   const eyebrow = isCurrent ? 'EN COURS' : 'PROCHAINE RÉSERVATION';
 
   return (

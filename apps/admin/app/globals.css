@@ -238,6 +238,11 @@
   font-weight: 500;
   color: var(--primary);
 }
+.rm-calendar .rm-event--opaque {
+  opacity: 0.72;
+  cursor: default;
+}
+
 .rm-calendar .rm-event--pending {
   --rm-event-accent: var(--warning);
   --rm-event-bg: color-mix(in oklab, var(--warning) 12%, var(--card));

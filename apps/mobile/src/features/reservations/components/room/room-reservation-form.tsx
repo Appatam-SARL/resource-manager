@@ -1,17 +1,23 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { Alert, StyleSheet, Text } from 'react-native';
 import { Controller, useForm, useWatch, type FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { CalendarClock, DoorOpen, MessageSquare, Presentation, Users } from 'lucide-react-native';
+import { CalendarClock, DoorOpen, MessageSquare, Package, Presentation, Users } from 'lucide-react-native';
 import type { MeetingRoom } from '@resource-manager/types';
 import { useRoom, useRooms } from '@/features/rooms/hooks/use-rooms';
 import {
   roomReservationSchema,
-  validateParticipantCountAgainstCapacity,
   type RoomReservationFormValues,
 } from '@/schemas/room-reservation-schema';
 import { combineDateAndTime } from '@/lib/format';
 import { useNow } from '@/hooks/use-now';
-import { RESOURCE_STATUS_LABELS, statusColor } from '@/constants/theme';
+import { colors, RESOURCE_STATUS_LABELS, statusColor } from '@/constants/theme';
+import { FixedEquipmentFilter } from '@/features/rooms/components/fixed-equipment-filter';
+import {
+  collectFixedEquipmentOptions,
+  filterRoomsByFixedEquipment,
+  toggleFixedEquipmentFilter,
+} from '@/features/rooms/lib/fixed-equipment';
 import { getAvailabilityState } from '@/features/reservations/lib/availability';
 import {
   formatDuration,
@@ -24,6 +30,9 @@ import {
   type Schedule,
 } from '@/features/reservations/lib/schedule';
 import { useSlotAvailability } from '@/features/reservations/hooks/use-slot-availability';
+import { useSlotEquipmentSelection } from '@/features/reservations/hooks/use-equipments';
+import type { EquipmentSelection } from '@/features/reservations/lib/equipment-selection';
+import { shouldShowCapacityAlert } from '@/features/reservations/lib/room-capacity';
 import {
   useReservationSubmission,
   type ReservationSuccessData,
@@ -36,12 +45,13 @@ import { ScheduleSection } from '../schedule-section';
 import { AvailabilityIndicator } from '../availability-indicator';
 import { FormField } from '../form-field';
 import { CountStepper } from '../count-stepper';
+import { EquipmentErrorNotice, EquipmentPicker } from '../equipment-picker';
 import { ReservationSummary, type SummaryItem } from '../reservation-summary';
 import { ReservationBottomBar } from '../reservation-bottom-bar';
 
 const DEFAULT_DURATION_MINUTES = 60;
 
-type Section = 'resource' | 'schedule' | 'availability' | 'details';
+type Section = 'resource' | 'schedule' | 'availability' | 'equipment' | 'details';
 
 function toRoomCard(room: MeetingRoom): ResourceCardData {
   return {
@@ -51,6 +61,7 @@ function toRoomCard(room: MeetingRoom): ResourceCardData {
     capacityLabel: pluralize(room.capacity, 'personne', 'personnes'),
     statusLabel: RESOURCE_STATUS_LABELS[room.status],
     statusColor: statusColor(room.status),
+    tags: room.fixedEquipment ?? [],
   };
 }
 
@@ -71,7 +82,7 @@ export function RoomReservationForm({ initialRoomId, onSuccess }: RoomReservatio
   const { scrollRef, register, scrollTo } = useSectionScroll<Section>();
   const { submit, submitError, clearSubmitError, isSubmitting } = useReservationSubmission();
 
-  const { control, handleSubmit, setValue, setError, formState } = useForm<RoomReservationFormValues>({
+  const { control, handleSubmit, setValue, formState } = useForm<RoomReservationFormValues>({
     resolver: zodResolver(roomReservationSchema),
     mode: 'onTouched',
     defaultValues: {
@@ -96,7 +107,15 @@ export function RoomReservationForm({ initialRoomId, onSuccess }: RoomReservatio
   const listedRoom = listed.find((r) => r.id === roomId);
   const detailQuery = useRoom(roomId && !listedRoom && roomsQuery.isSuccess ? roomId : undefined);
   const selectedRoom = listedRoom ?? detailQuery.data;
-  const rooms = selectedRoom && !listedRoom ? [selectedRoom, ...listed] : listed;
+  const allRooms = selectedRoom && !listedRoom ? [selectedRoom, ...listed] : listed;
+  const [equipmentFilter, setEquipmentFilter] = useState<string[]>([]);
+  const equipmentOptions = collectFixedEquipmentOptions(allRooms);
+  const filteredRooms = filterRoomsByFixedEquipment(allRooms, equipmentFilter);
+  const rooms =
+    selectedRoom && !filteredRooms.some((room) => room.id === selectedRoom.id)
+      ? [selectedRoom, ...filteredRooms]
+      : filteredRooms;
+  const noRoomMatchesFilter = equipmentFilter.length > 0 && filteredRooms.length === 0;
   const bookable = selectedRoom ? selectedRoom.status === 'AVAILABLE' : true;
 
   const scheduleIssue = getScheduleIssue(schedule, now);
@@ -115,6 +134,41 @@ export function RoomReservationForm({ initialRoomId, onSuccess }: RoomReservatio
     isError: availability.isError,
     available: availability.data?.available,
   });
+
+  const equipment = useSlotEquipmentSelection({
+    resourceType: 'ROOM',
+    schedule,
+    scheduleValid: !scheduleIssue,
+  });
+
+  const alertedRoomIdRef = useRef<string | null>(null);
+
+  const changeParticipantCount = (
+    previousCount: number,
+    nextCount: number,
+    onChange: (value: number) => void,
+  ) => {
+    onChange(nextCount);
+    if (
+      selectedRoom &&
+      shouldShowCapacityAlert({
+        previousCount,
+        nextCount,
+        capacity: selectedRoom.capacity,
+        roomId: selectedRoom.id,
+        alertedRoomId: alertedRoomIdRef.current,
+      })
+    ) {
+      alertedRoomIdRef.current = selectedRoom.id;
+      Alert.alert(
+        'Capacité de la salle dépassée',
+        `La salle ${selectedRoom.name} est prévue pour ${pluralize(selectedRoom.capacity, 'personne', 'personnes')}. ` +
+          'Vous pouvez tout de même continuer à augmenter le nombre de participants : ' +
+          'la capacité est indicative et votre demande sera transmise pour validation.',
+        [{ text: 'J’ai compris' }],
+      );
+    }
+  };
 
   const selectRoom = (id: string) => {
     clearSubmitError();
@@ -135,20 +189,12 @@ export function RoomReservationForm({ initialRoomId, onSuccess }: RoomReservatio
       scrollTo('schedule');
       return;
     }
-    if (selectedRoom) {
-      const capacityError = validateParticipantCountAgainstCapacity(form.participantCount, selectedRoom.capacity);
-      if (capacityError) {
-        setError('participantCount', { message: capacityError });
-        scrollTo('details');
-        return;
-      }
-    }
     if (!bookable || availability.data?.available === false) {
       scrollTo('availability');
       return;
     }
 
-    const reservation = await submit({
+    const { reservation, error } = await submit({
       resourceType: 'ROOM',
       roomId: form.roomId,
       startAt: combineDateAndTime(form.startDate, form.startTime),
@@ -156,6 +202,7 @@ export function RoomReservationForm({ initialRoomId, onSuccess }: RoomReservatio
       meetingSubject: form.meetingSubject.trim(),
       participantCount: form.participantCount,
       comment: form.comment?.trim() || undefined,
+      equipments: equipment.payload.length > 0 ? equipment.payload : undefined,
     });
     if (reservation) {
       onSuccess({
@@ -166,8 +213,13 @@ export function RoomReservationForm({ initialRoomId, onSuccess }: RoomReservatio
         scheduleLabel: formatScheduleRange(form),
       });
     } else {
-      scrollTo('availability');
+      scrollTo(error.kind === 'equipment' ? 'equipment' : 'availability');
     }
+  };
+
+  const changeEquipments = (next: EquipmentSelection) => {
+    if (submitError?.kind === 'equipment') clearSubmitError();
+    equipment.setSelection(next);
   };
 
   const onSubmit = handleSubmit(onValid, (errors) => scrollTo(sectionForErrors(errors)));
@@ -201,6 +253,9 @@ export function RoomReservationForm({ initialRoomId, onSuccess }: RoomReservatio
       label: 'Participants',
       value: pluralize(values.participantCount ?? 1, 'participant', 'participants'),
     },
+    equipment.summaryLines.length > 0
+      ? { key: 'equipments', icon: Package, label: 'Équipements', value: equipment.summaryLines.join('\n') }
+      : null,
   ].filter((item): item is SummaryItem => item !== null);
 
   return (
@@ -217,6 +272,19 @@ export function RoomReservationForm({ initialRoomId, onSuccess }: RoomReservatio
       }
     >
       <FormSection step={1} title="Salle" description="Choisissez la salle de votre réunion" onLayout={register('resource')}>
+        <FixedEquipmentFilter
+          options={equipmentOptions}
+          selected={equipmentFilter}
+          onToggle={(label) => setEquipmentFilter((current) => toggleFixedEquipmentFilter(current, label))}
+        />
+        {noRoomMatchesFilter ? (
+          <Text style={styles.filterHint}>
+            Aucune salle ne dispose de tous ces équipements fixes.{' '}
+            <Text style={styles.filterReset} onPress={() => setEquipmentFilter([])} accessibilityRole="button">
+              Effacer le filtre
+            </Text>
+          </Text>
+        ) : null}
         <ResourceSelector
           items={rooms.map(toRoomCard)}
           icon={DoorOpen}
@@ -264,7 +332,25 @@ export function RoomReservationForm({ initialRoomId, onSuccess }: RoomReservatio
         />
       </FormSection>
 
-      <FormSection step={4} title="Votre réunion" onLayout={register('details')}>
+      <FormSection
+        step={4}
+        title="Équipements"
+        description="Facultatif · matériel à prévoir pour ce créneau"
+        onLayout={register('equipment')}
+      >
+        <EquipmentPicker
+          items={equipment.availability.data}
+          selection={equipment.selection}
+          onChange={changeEquipments}
+          isLoading={equipment.availability.isLoading}
+          isError={equipment.availability.isError}
+          onRetry={() => void equipment.availability.refetch()}
+          disabledMessage={scheduleIssue ? 'Choisissez un créneau valide pour voir les équipements disponibles.' : undefined}
+        />
+        {submitError?.kind === 'equipment' ? <EquipmentErrorNotice message={submitError.message} /> : null}
+      </FormSection>
+
+      <FormSection step={5} title="Votre réunion" onLayout={register('details')}>
         <Controller
           control={control}
           name="meetingSubject"
@@ -288,12 +374,18 @@ export function RoomReservationForm({ initialRoomId, onSuccess }: RoomReservatio
             <CountStepper
               label="Nombre de participants"
               value={value}
-              onChange={onChange}
+              onChange={(next) => changeParticipantCount(value, next, onChange)}
               unit={{ singular: 'participant', plural: 'participants' }}
               max={selectedRoom?.capacity}
+              enforceMax={false}
               capacityLabel={
                 selectedRoom
                   ? `Capacité de la salle : ${pluralize(selectedRoom.capacity, 'personne', 'personnes')}`
+                  : undefined
+              }
+              overCapacityWarning={
+                selectedRoom
+                  ? `Dépasse la capacité indiquée de la salle (${pluralize(selectedRoom.capacity, 'personne', 'personnes')}). Vous pouvez continuer.`
                   : undefined
               }
               missingCapacityHint="Sélectionnez une salle pour connaître sa capacité."
@@ -320,7 +412,7 @@ export function RoomReservationForm({ initialRoomId, onSuccess }: RoomReservatio
         />
       </FormSection>
 
-      <FormSection step={5} title="Résumé">
+      <FormSection step={6} title="Résumé">
         <ReservationSummary
           items={summaryItems}
           emptyMessage="Sélectionnez une salle et un créneau."
@@ -330,3 +422,14 @@ export function RoomReservationForm({ initialRoomId, onSuccess }: RoomReservatio
     </ReservationFormShell>
   );
 }
+
+const styles = StyleSheet.create({
+  filterHint: {
+    fontSize: 13,
+    color: colors.textMuted,
+  },
+  filterReset: {
+    fontWeight: '700',
+    color: colors.primary,
+  },
+});

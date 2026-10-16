@@ -1,8 +1,13 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ResourceStatus } from '@prisma/client';
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { ArrayMaxSize, IsArray, IsEnum, IsOptional, IsString } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination.dto.js';
 import { ResourceListScope } from '../../../common/dto/resource-list-scope.js';
+import {
+  MAX_FIXED_EQUIPMENT_ITEMS,
+  transformFixedEquipmentQuery,
+} from './fixed-equipment.js';
 
 export class ListRoomsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
@@ -31,4 +36,17 @@ export class ListRoomsQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @ApiPropertyOptional({
+    type: String,
+    example: 'Écran mural,Visioconférence intégrée',
+    description:
+      'Salles possédant TOUS ces équipements fixes (libellés séparés par des virgules, sensibles à la casse).',
+  })
+  @IsOptional()
+  @Transform(transformFixedEquipmentQuery)
+  @IsArray()
+  @ArrayMaxSize(MAX_FIXED_EQUIPMENT_ITEMS)
+  @IsString({ each: true })
+  fixedEquipment?: string[];
 }

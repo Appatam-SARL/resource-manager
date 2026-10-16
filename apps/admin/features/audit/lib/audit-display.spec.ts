@@ -20,6 +20,40 @@ describe('auditEntityHref', () => {
   });
 });
 
+describe('equipment audit entries', () => {
+  it('links and labels the Equipment entity', () => {
+    expect(auditEntityLabel('Equipment')).toBe('Équipement');
+    expect(auditEntityHref({ entity: 'Equipment', entityId: 'e1', action: 'UPDATE' })).toBe('/equipments/e1');
+  });
+
+  it('summarizes a reservation equipment update', () => {
+    expect(
+      summarizeAuditLog({
+        action: 'UPDATE',
+        metadata: {
+          operation: 'EQUIPMENT_UPDATE',
+          before: [],
+          after: [
+            { equipmentId: 'e1', name: 'Vidéoprojecteur', quantity: 1 },
+            { equipmentId: 'e2', name: 'Micro', quantity: 2 },
+          ],
+        },
+      }),
+    ).toBe('Équipements : Vidéoprojecteur × 1, Micro × 2');
+  });
+
+  it('shows fixed equipment changes of a room', () => {
+    const changes = auditChanges({
+      before: { fixedEquipment: ['Écran'] },
+      after: { fixedEquipment: ['Écran', 'Tableau blanc'] },
+    });
+
+    expect(changes).toEqual([
+      { key: 'fixedEquipment', label: 'Équipements fixes', before: 'Écran', after: 'Écran, Tableau blanc' },
+    ]);
+  });
+});
+
 describe('auditEntityLabel', () => {
   it('translates known entities and keeps the others', () => {
     expect(auditEntityLabel('MeetingRoom')).toBe('Salle');

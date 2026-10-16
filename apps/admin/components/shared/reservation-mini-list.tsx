@@ -9,7 +9,9 @@ import { ErrorState } from '@/components/shared/error-state';
 import { ResourceTypeIcon } from '@/components/shared/resource-type-icon';
 import { StatusBadge } from '@/components/shared/status-badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useNow } from '@/hooks/use-now';
 import { formatDateTime, reservationResourceLabel, userDisplayName } from '@/lib/format';
+import { getDisplayStatus } from '@/lib/status';
 
 type ReservationMiniListProps = {
   reservations: Reservation[] | undefined;
@@ -30,6 +32,7 @@ export function ReservationMiniList({
   trailing,
   skeletonRows = 4,
 }: ReservationMiniListProps) {
+  const now = useNow();
   if (isError) {
     return <ErrorState size="compact" message="Impossible de charger les réservations." onRetry={onRetry} />;
   }
@@ -68,7 +71,7 @@ export function ReservationMiniList({
                 {userDisplayName(reservation.user)} · {formatDateTime(reservation.startAt)}
               </p>
             </div>
-            <StatusBadge status={reservation.status} className="hidden sm:inline-flex" />
+            <StatusBadge status={getDisplayStatus(reservation, now)} className="hidden sm:inline-flex" />
           </Link>
           {trailing?.(reservation)}
         </li>

@@ -8,6 +8,7 @@ import { ReservationSuccess } from '@/features/reservations/components/reservati
 import { VehicleReservationForm } from '@/features/reservations/components/vehicle/vehicle-reservation-form';
 import { RoomReservationForm } from '@/features/reservations/components/room/room-reservation-form';
 import type { ReservationSuccessData } from '@/features/reservations/hooks/use-reservation-submission';
+import { formatReservationEquipments } from '@/features/reservations/lib/equipment-selection';
 import { colors } from '@/constants/theme';
 
 export default function NewReservationScreen() {
@@ -48,6 +49,7 @@ export default function NewReservationScreen() {
           status={success.reservation.status}
           resourceName={success.resourceName}
           scheduleLabel={success.scheduleLabel}
+          equipmentLines={formatReservationEquipments(success.reservation.equipments)}
           onViewReservation={() => router.replace(`/(app)/reservations/${success.reservation.id}`)}
           onBackToList={() => router.replace('/(app)/reservations')}
         />

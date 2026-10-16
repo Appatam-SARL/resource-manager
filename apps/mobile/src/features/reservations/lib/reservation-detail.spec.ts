@@ -92,8 +92,26 @@ describe('getExtensionIneligibility', () => {
 
   it('lets managers act within their visible scope (backend re-checks)', () => {
     expect(getExtensionIneligibility(makeReservation(), now, manager)).toBeNull();
-    expect(canCancelReservation(makeReservation(), manager)).toBe(true);
-    expect(canCancelReservation(makeReservation(), colleague)).toBe(false);
+    const upcoming = makeReservation({ startAt: at(28, 12), endAt: at(28, 13) });
+    expect(canCancelReservation(upcoming, now, manager)).toBe(true);
+    expect(canCancelReservation(upcoming, now, colleague)).toBe(false);
+  });
+});
+
+describe('canCancelReservation', () => {
+  it('allows cancelling a reservation that has not started yet', () => {
+    expect(canCancelReservation(makeReservation({ startAt: at(28, 12), endAt: at(28, 13) }), now, owner)).toBe(true);
+  });
+
+  it('refuses a reservation in progress or exactly at its start time', () => {
+    expect(canCancelReservation(makeReservation(), now, owner)).toBe(false);
+    expect(canCancelReservation(makeReservation({ startAt: at(28, 10), endAt: at(28, 11) }), now, owner)).toBe(false);
+  });
+
+  it('refuses a finished reservation, even for a manager', () => {
+    const finished = makeReservation({ startAt: at(28, 7), endAt: at(28, 8) });
+    expect(canCancelReservation(finished, now, owner)).toBe(false);
+    expect(canCancelReservation(finished, now, manager)).toBe(false);
   });
 });
 

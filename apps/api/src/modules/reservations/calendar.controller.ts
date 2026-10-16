@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, UseInterceptors } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -10,11 +10,13 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { CalendarQueryDto } from './dto/availability-query.dto.js';
+import { ReservationCompletionInterceptor } from './reservation-completion.interceptor.js';
 import { ReservationsService } from './reservations.service.js';
 
 @ApiTags('Calendar')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
+@UseInterceptors(ReservationCompletionInterceptor)
 @Controller('calendar')
 export class CalendarController {
   constructor(private readonly reservationsService: ReservationsService) {}
@@ -22,7 +24,7 @@ export class CalendarController {
   @Get()
   @ApiOperation({
     summary:
-      'Calendrier des réservations (créneaux PENDING/APPROVED dans la période)',
+      'Occupation Groupe (PENDING / APPROVED / COMPLETED) ; détail personnel seulement dans le périmètre du viewer',
   })
   @ApiOkResponse()
   getCalendar(

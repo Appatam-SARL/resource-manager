@@ -11,7 +11,7 @@ export default function CalendarPage() {
     <div className="space-y-6">
       <PageHeader
         title="Calendrier"
-        description="Occupation des véhicules et des salles : réservations en attente, approuvées et terminées."
+        description="Occupation Groupe des véhicules et des salles. Le détail d’une réservation hors de votre périmètre reste masqué."
         actions={
           <Link href="/reservations" className={buttonVariants({ variant: 'outline' })}>
             <List className="size-4" aria-hidden />

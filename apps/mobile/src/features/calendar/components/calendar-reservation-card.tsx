@@ -1,6 +1,6 @@
 import { memo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { MapPin, MoveRight, Presentation, UserRound } from 'lucide-react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Lock, MapPin, MoveRight, Presentation, UserRound } from 'lucide-react-native';
 import type { AgendaEventRow } from '@/features/calendar/lib/calendar';
 import { ReservationResourceIcon } from '@/features/reservations/components/list/reservation-card';
 import { ReservationStatusBadge } from '@/features/reservations/components/list/reservation-status-badge';
@@ -19,10 +19,12 @@ export const CalendarReservationCard = memo(function CalendarReservationCard({
   onPress,
 }: CalendarReservationCardProps) {
   const { event, inProgress, isNext } = row;
+  const opaque = Boolean(event.opaque);
   const isVehicle = event.resourceType === 'VEHICLE';
   const title = event.resourceName ?? event.title;
   const ContextIcon = isVehicle ? MapPin : Presentation;
-  const requester = event.userId && event.userId !== currentUserId ? event.requesterName : undefined;
+  const requester =
+    !opaque && event.userId && event.userId !== currentUserId ? event.requesterName : undefined;
   const remaining = inProgress
     ? row.minutesLeft <= 1
       ? 'se termine dans moins d’une minute'
@@ -37,20 +39,36 @@ export const CalendarReservationCard = memo(function CalendarReservationCard({
     row.spanNote,
     inProgress ? `En cours, ${remaining}` : null,
     isNext ? 'Prochaine réservation' : null,
-    event.context,
+    opaque ? 'Créneau réservé' : event.context,
     requester ? `Demandée par ${requester}` : null,
-    `Statut : ${RESERVATION_STATUS_LABELS[event.status]}`,
+    `Statut : ${RESERVATION_STATUS_LABELS[row.displayStatus]}`,
   ]
     .filter(Boolean)
     .join(', ');
+
+  const handlePress = () => {
+    if (opaque) {
+      Alert.alert(
+        'Créneau réservé',
+        'Cette réservation appartient à un autre périmètre. Seuls la ressource et les horaires sont visibles.',
+      );
+      return;
+    }
+    onPress(event.id);
+  };
 
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      accessibilityHint="Ouvre le détail de la réservation"
-      onPress={() => onPress(event.id)}
-      style={({ pressed }) => [styles.card, inProgress && styles.cardActive, pressed && styles.pressed]}
+      accessibilityHint={opaque ? 'Créneau hors de votre périmètre' : 'Ouvre le détail de la réservation'}
+      onPress={handlePress}
+      style={({ pressed }) => [
+        styles.card,
+        inProgress && styles.cardActive,
+        opaque && styles.cardOpaque,
+        pressed && styles.pressed,
+      ]}
     >
       {inProgress || isNext ? (
         <View style={styles.tagRow}>
@@ -83,11 +101,19 @@ export const CalendarReservationCard = memo(function CalendarReservationCard({
             ) : null}
           </View>
         </View>
-        <ReservationStatusBadge status={event.status} />
+        <ReservationStatusBadge status={row.displayStatus} />
       </View>
 
-      {row.spanNote || event.context || requester ? (
+      {opaque || row.spanNote || event.context || requester ? (
         <View style={styles.meta}>
+          {opaque ? (
+            <View style={styles.metaRow}>
+              <Lock size={14} color={colors.textMuted} />
+              <Text style={styles.metaText} numberOfLines={1}>
+                Créneau réservé
+              </Text>
+            </View>
+          ) : null}
           {row.spanNote ? (
             <View style={styles.metaRow}>
               <MoveRight size={14} color={colors.primary} />
@@ -96,7 +122,7 @@ export const CalendarReservationCard = memo(function CalendarReservationCard({
               </Text>
             </View>
           ) : null}
-          {event.context ? (
+          {!opaque && event.context ? (
             <View style={styles.metaRow}>
               <ContextIcon size={14} color={colors.textMuted} />
               <Text style={styles.metaText} numberOfLines={1}>
@@ -130,6 +156,9 @@ const styles = StyleSheet.create({
   cardActive: {
     borderColor: colors.primaryLight,
     backgroundColor: '#F4FAF6',
+  },
+  cardOpaque: {
+    opacity: 0.88,
   },
   pressed: {
     opacity: 0.85,

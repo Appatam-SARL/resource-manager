@@ -2,6 +2,7 @@ import { UnauthorizedException } from '@nestjs/common';
 import { Role, UserStatus } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import { AuthController } from './auth.controller.js';
+import { PASSWORD_RESET } from './constants/auth.constants.js';
 import type { AuthenticatedUser } from './types/authenticated-user.type.js';
 
 vi.mock('@nestjs/swagger', () => {
@@ -11,6 +12,7 @@ vi.mock('@nestjs/swagger', () => {
     ApiTags: factory,
     ApiOperation: factory,
     ApiOkResponse: factory,
+    ApiAcceptedResponse: factory,
     ApiBadRequestResponse: factory,
     ApiUnauthorizedResponse: factory,
     ApiTooManyRequestsResponse: factory,
@@ -42,12 +44,34 @@ describe('AuthController / JWT protection', () => {
       logout: vi.fn(),
     };
 
-    const controller = new AuthController(authService as never);
+    const controller = new AuthController(authService as never, {} as never);
     const result = await controller.me(authenticatedUser);
 
     expect(result).toEqual(authenticatedUser);
     expect(result).not.toHaveProperty('passwordHash');
     expect(authService.me).toHaveBeenCalledWith('user-1');
+  });
+});
+
+describe('AuthController / forgot password', () => {
+  it('answers immediately with the same message, without waiting for the e-mail', () => {
+    let finishRequest: () => void = () => undefined;
+    const passwordResetService = {
+      requestPasswordReset: vi.fn(
+        () => new Promise<void>((resolve) => {
+          finishRequest = resolve;
+        }),
+      ),
+    };
+    const controller = new AuthController({} as never, passwordResetService as never);
+
+    const known = controller.forgotPassword({ email: 'employee@appatam.dev' });
+    const unknown = controller.forgotPassword({ email: 'nobody@appatam.dev' });
+
+    expect(known).toEqual({ message: PASSWORD_RESET.ACCEPTED_MESSAGE });
+    expect(unknown).toEqual(known);
+    expect(passwordResetService.requestPasswordReset).toHaveBeenCalledTimes(2);
+    finishRequest();
   });
 });
 

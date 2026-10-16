@@ -191,9 +191,23 @@ Les véhicules et salles de réunion sont partagés par tout le Groupe :
 
 - `companyId` de la ressource = **entreprise gestionnaire** : seule elle (ou un GROUP_ADMIN) crée, modifie, change le statut ou supprime la ressource ;
 - tout utilisateur actif d'une entreprise active du Groupe peut consulter et réserver une ressource `AVAILABLE` dont l'entreprise gestionnaire est active (`GET /vehicles|/rooms?scope=group`) ; le scope par défaut `managed` reste réservé à l'administration ;
-- `Reservation.companyId` = **entreprise du demandeur** : l'approbation, le rejet et la visibilité suivent la hiérarchie du demandeur (Company Admin / Manager de sa direction) ;
+- `Reservation.companyId` = **entreprise du demandeur** : l'approbation, le rejet et la visibilité de la **liste Réservations** suivent la hiérarchie du demandeur (Company Admin / Manager de sa direction) ;
 - la disponibilité d'une ressource ne révèle jamais le demandeur ni l'objet d'une réservation d'une autre entreprise (uniquement le créneau occupé) ;
+- le **calendrier** (`GET /calendar`) expose l'occupation Groupe (PENDING / APPROVED / COMPLETED) : tout membre voit les créneaux pris ; le demandeur, l'objet et le lien détail ne sont exposés que si `canViewReservation` ; hors périmètre l'événement est `opaque: true` ;
 - les autres types de ressources futurs ne sont PAS partagés implicitement.
+
+### RÈGLE DES ÉQUIPEMENTS (EXPLICITEMENT DÉCIDÉE)
+
+Les équipements (vidéoprojecteur, micro, kit visio, siège enfant…) sont des compléments demandés avec une réservation de salle ou de véhicule ; ils ne sont jamais réservés seuls.
+
+- catalogue unique au niveau Groupe (`Equipment`, sans `companyId`) : seul un GROUP_ADMIN crée, modifie, change le statut ou supprime un équipement ;
+- tout utilisateur actif d'une entreprise active peut demander des équipements `AVAILABLE` dont le périmètre (`ROOM`, `VEHICLE`, `BOTH`) correspond au type de la réservation ; quantité ≥ 1 par ligne (50 max, 20 lignes max) ;
+- disponibilité = quantité en stock − pic d'utilisation simultanée des réservations PENDING / APPROVED qui chevauchent le créneau ; CANCELLED, REJECTED et COMPLETED libèrent le stock ;
+- la disponibilité n'expose jamais le demandeur ni l'objet des autres réservations ;
+- création, modification et prolongation revérifient les équipements côté backend, sous verrou (ressource puis équipements triés) ; un manque renvoie un 409 avec le code `EQUIPMENT_UNAVAILABLE` ;
+- le propriétaire, ou un responsable / administrateur de son périmètre, peut modifier les équipements d'une réservation PENDING ou APPROVED jusqu'à son heure de début (heure serveur) ; une réservation APPROVED reste APPROVED et les approbateurs reçoivent `RESERVATION_EQUIPMENT_UPDATED` ;
+- un équipement utilisé par une réservation ne peut pas être supprimé (409, le mettre hors service) ; son stock ne peut pas descendre sous ce qui est déjà engagé sur des réservations à venir (409) ;
+- les équipements fixes d'une salle (`MeetingRoom.fixedEquipment`, 20 libellés de 60 caractères max) sont informatifs et filtrables ; ils ne sont pas réservables.
 
 ---
 
@@ -561,7 +575,14 @@ Group
 
 Reservation
     ├── User
-    └── Resource
+    ├── Resource
+    └── ReservationEquipment (N) ──→ Equipment
+
+Equipment (catalogue Groupe, sans companyId : nom unique, quantité, périmètre ROOM / VEHICLE / BOTH, statut ResourceStatus)
+
+ReservationEquipment (reservationId + equipmentId, quantité ; suppression en cascade avec la réservation, Restrict côté équipement)
+
+MeetingRoom.fixedEquipment : libellés d'équipements installés en permanence (non réservables).
 
 La ressource peut être modélisée selon le choix architectural retenu, mais le modèle doit permettre de gérer proprement les véhicules et les salles.
 
@@ -825,11 +846,17 @@ Le système vérifie :
 - l'appartenance de la salle à l'entreprise ;
 - le statut ;
 - la disponibilité ;
-- la capacité ;
 - les horaires ;
 - les conflits.
 
-Le nombre de participants doit être inférieur ou égal à la capacité de la salle.
+### RÈGLE DE CAPACITÉ DES SALLES (EXPLICITEMENT DÉCIDÉE)
+
+La capacité d'une salle est **indicative** : elle ne limite PAS le nombre de participants.
+
+- le nombre de participants doit être un entier ≥ 1, avec une borne technique de 1000 ;
+- un dépassement de la capacité est accepté et affiché comme un avertissement non bloquant ;
+- cette règle ne s'applique qu'aux salles : pour un véhicule, le nombre de passagers reste
+  strictement limité au nombre de places (contrôle bloquant côté backend).
 
 ---
 
@@ -856,6 +883,13 @@ CANCELLED
 COMPLETED
 
 Un rejet nécessite obligatoirement un motif.
+
+Une réservation ne peut plus être annulée dès que sa date/heure de début est atteinte
+(réservation en cours ou terminée), quel que soit le rôle, administrateurs compris.
+Le contrôle est fait côté backend avec l'heure du serveur ; les interfaces masquent l'action.
+
+Une réservation APPROVED passe automatiquement à COMPLETED lorsque son heure de fin est atteinte
+(tâche planifiée côté backend, heure du serveur). Les réservations PENDING expirées ne sont pas concernées.
 
 Une réservation ne doit jamais être supprimée physiquement lorsque son historique est important.
 

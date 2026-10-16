@@ -57,7 +57,8 @@ export const createReservationSchema = z
     missionReason: z.string().optional(),
     passengerCount: z.number().int().positive().optional(),
     meetingSubject: z.string().optional(),
-    participantCount: z.number().int().positive().optional(),
+    // Room capacity is indicative: only a technical bound applies.
+    participantCount: z.number().int().positive().max(1000).optional(),
     comment: z.string().optional(),
   })
   .superRefine((data, ctx) => {

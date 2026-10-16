@@ -1,12 +1,79 @@
 import { describe, expect, it } from 'vitest';
 import type { CalendarEvent } from '@resource-manager/types';
 import {
+  formatAverageDuration,
   formatDayDelta,
   formatEventTimeRange,
+  formatRoomUsageHint,
+  formatUsageDirectionLabel,
   getTwoDayRange,
   isEventInProgress,
   splitTodayAndYesterday,
+  usageSharePercent,
 } from './dashboard';
+
+describe('room usage by direction', () => {
+  const entry = {
+    directionId: 'dir-tech',
+    directionName: 'Direction Technique',
+    companyId: 'company-a',
+    companyName: 'Appatam',
+    reservationCount: 4,
+    totalMinutes: 240,
+  };
+
+  it('labels directions, with the company in the group view', () => {
+    expect(formatUsageDirectionLabel(entry, false)).toBe('Direction Technique');
+    expect(formatUsageDirectionLabel(entry, true)).toBe('Direction Technique · Appatam');
+    expect(formatUsageDirectionLabel({ ...entry, directionId: null, directionName: null }, false)).toBe(
+      'Appatam · sans direction',
+    );
+  });
+
+  it('computes the share of booked time', () => {
+    expect(usageSharePercent(240, 720)).toBe(33);
+    expect(usageSharePercent(0, 0)).toBe(0);
+  });
+});
+
+describe('formatAverageDuration', () => {
+  it('formats minutes, hours and days', () => {
+    expect(formatAverageDuration(45)).toBe('45 min');
+    expect(formatAverageDuration(65)).toBe('1 h 05');
+    expect(formatAverageDuration(120)).toBe('2 h');
+    expect(formatAverageDuration(1440 + 180)).toBe('1 j 3 h');
+  });
+});
+
+describe('formatRoomUsageHint', () => {
+  const base = { averageMinutes: 75, reservationCount: 12, periodDays: 30 };
+
+  it('shows the trend versus the previous period', () => {
+    expect(formatRoomUsageHint({ ...base, previous: { averageMinutes: 60, reservationCount: 8 } })).toBe(
+      '12 réunions · 30 j · +15 min vs période préc.',
+    );
+    expect(formatRoomUsageHint({ ...base, previous: { averageMinutes: 90, reservationCount: 8 } })).toBe(
+      '12 réunions · 30 j · −15 min vs période préc.',
+    );
+    expect(formatRoomUsageHint({ ...base, previous: { averageMinutes: 75, reservationCount: 3 } })).toBe(
+      '12 réunions · 30 j · stable',
+    );
+  });
+
+  it('handles a missing previous period or no meeting at all', () => {
+    expect(
+      formatRoomUsageHint({ ...base, reservationCount: 1, previous: { averageMinutes: null, reservationCount: 0 } }),
+    ).toBe('1 réunion · 30 j');
+    expect(
+      formatRoomUsageHint({
+        averageMinutes: null,
+        reservationCount: 0,
+        periodDays: 30,
+        previous: { averageMinutes: null, reservationCount: 0 },
+      }),
+    ).toBe('Aucune réunion terminée sur 30 jours');
+  });
+});
 
 // Tuesday 29 September 2026, 10:00 local time.
 const now = new Date(2026, 8, 29, 10, 0);

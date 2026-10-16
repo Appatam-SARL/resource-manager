@@ -9,6 +9,7 @@ import { StatusBadge } from '@/components/shared/status-badge';
 import { Button } from '@/components/ui/button';
 import { useReservation, useReservationDecisions } from '@/features/reservations';
 import {
+  ReservationEquipmentsPanel,
   ReservationHistoryPanel,
   ReservationRequestPanel,
   ReservationRequesterPanel,
@@ -18,6 +19,8 @@ import {
 import { formatDateTime, reservationResourceLabel, RESOURCE_TYPE_LABELS } from '@/lib/format';
 import { canAccessRoute } from '@/lib/rbac';
 import { canApproveOrReject, canCancelReservation } from '@/lib/reservation-permissions';
+import { getDisplayStatus } from '@/lib/status';
+import { useNow } from '@/hooks/use-now';
 import { useAuth } from '@/providers/auth-provider';
 
 type PageProps = {
@@ -27,6 +30,7 @@ type PageProps = {
 export default function ReservationDetailPage({ params }: PageProps) {
   const { id } = use(params);
   const { user } = useAuth();
+  const now = useNow();
   const query = useReservation(id);
   const decisions = useReservationDecisions();
 
@@ -51,6 +55,7 @@ export default function ReservationDetailPage({ params }: PageProps) {
   const reservation = query.data;
   const showDecision = canApproveOrReject(user, reservation);
   const showCancel = canCancelReservation(user, reservation);
+  const displayStatus = getDisplayStatus(reservation, now);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -59,7 +64,7 @@ export default function ReservationDetailPage({ params }: PageProps) {
         title={reservationResourceLabel(reservation)}
         meta={
           <>
-            <StatusBadge status={reservation.status} />
+            <StatusBadge status={displayStatus} />
             <span>{RESOURCE_TYPE_LABELS[reservation.resourceType]}</span>
             <span aria-hidden>·</span>
             <span>Demandée le {formatDateTime(reservation.createdAt)}</span>
@@ -123,11 +128,12 @@ export default function ReservationDetailPage({ params }: PageProps) {
         <div className="space-y-4 lg:col-span-2">
           <ReservationSlotPanel reservation={reservation} />
           <ReservationRequestPanel reservation={reservation} />
+          <ReservationEquipmentsPanel reservation={reservation} />
         </div>
         <div className="space-y-4">
           <ReservationRequesterPanel reservation={reservation} />
           <ReservationResourcePanel reservation={reservation} canOpenResource={canAccessRoute(user.role, reservation.resourceType === 'VEHICLE' ? '/vehicles' : '/rooms')} />
-          <ReservationHistoryPanel reservation={reservation} />
+          <ReservationHistoryPanel reservation={{ ...reservation, status: displayStatus }} />
         </div>
       </div>
 

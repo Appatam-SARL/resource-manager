@@ -1,6 +1,7 @@
 import { plainToInstance, Type } from 'class-transformer';
 import {
   IsEnum,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -92,6 +93,51 @@ export class EnvironmentVariables {
   @IsString()
   @IsOptional()
   EXPO_ACCESS_TOKEN?: string;
+
+  /** Outgoing mail (password reset codes). Required when APP_ENV=production. */
+  @IsString()
+  @IsOptional()
+  SMTP_HOST?: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  @IsOptional()
+  SMTP_PORT?: number;
+
+  /** "true" for implicit TLS (port 465), "false" for STARTTLS (port 587). */
+  @IsIn(['true', 'false'])
+  @IsOptional()
+  SMTP_SECURE?: 'true' | 'false';
+
+  @IsString()
+  @IsOptional()
+  SMTP_USER?: string;
+
+  @IsString()
+  @IsOptional()
+  SMTP_PASSWORD?: string;
+
+  @IsString()
+  @IsOptional()
+  MAIL_FROM?: string;
+}
+
+const SMTP_REQUIRED_KEYS = [
+  'SMTP_HOST',
+  'SMTP_PORT',
+  'SMTP_USER',
+  'SMTP_PASSWORD',
+  'MAIL_FROM',
+] as const satisfies readonly (keyof EnvironmentVariables)[];
+
+function findMissingSmtpKeys(env: EnvironmentVariables): string[] {
+  if (env.APP_ENV !== AppEnv.Production) return [];
+  return SMTP_REQUIRED_KEYS.filter((key) => {
+    const value = env[key];
+    return value === undefined || value === null || String(value).trim() === '';
+  });
 }
 
 export function validateEnv(config: Record<string, unknown>) {
@@ -108,6 +154,13 @@ export function validateEnv(config: Record<string, unknown>) {
       .map((error) => Object.values(error.constraints ?? {}).join(', '))
       .join('; ');
     throw new Error(`Invalid environment configuration: ${messages}`);
+  }
+
+  const missingSmtpKeys = findMissingSmtpKeys(validated);
+  if (missingSmtpKeys.length > 0) {
+    throw new Error(
+      `Invalid environment configuration: ${missingSmtpKeys.join(', ')} required when APP_ENV=production`,
+    );
   }
 
   return validated;

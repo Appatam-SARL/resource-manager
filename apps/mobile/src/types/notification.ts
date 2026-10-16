@@ -4,6 +4,7 @@ export const RESERVATION_NOTIFICATION_TYPES = [
   'RESERVATION_REJECTED',
   'RESERVATION_CANCELLED',
   'RESERVATION_EXTENDED',
+  'RESERVATION_EQUIPMENT_UPDATED',
 ] as const;
 
 export type ReservationNotificationType =

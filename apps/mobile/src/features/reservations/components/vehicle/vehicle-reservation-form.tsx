@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Controller, useForm, useWatch, type FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { CalendarClock, Car, FileText, MapPin, MessageSquare, Target, Users } from 'lucide-react-native';
+import { CalendarClock, Car, FileText, MapPin, MessageSquare, Package, Target, Users } from 'lucide-react-native';
 import type { ImageSource } from 'expo-image';
 import type { Vehicle } from '@resource-manager/types';
 import { useVehicle, useVehicles } from '@/features/vehicles/hooks/use-vehicles';
@@ -26,6 +26,8 @@ import {
   type Schedule,
 } from '@/features/reservations/lib/schedule';
 import { useSlotAvailability } from '@/features/reservations/hooks/use-slot-availability';
+import { useSlotEquipmentSelection } from '@/features/reservations/hooks/use-equipments';
+import type { EquipmentSelection } from '@/features/reservations/lib/equipment-selection';
 import {
   useReservationSubmission,
   type ReservationSuccessData,
@@ -38,12 +40,13 @@ import { ScheduleSection } from '../schedule-section';
 import { AvailabilityIndicator } from '../availability-indicator';
 import { FormField } from '../form-field';
 import { CountStepper } from '../count-stepper';
+import { EquipmentErrorNotice, EquipmentPicker } from '../equipment-picker';
 import { ReservationSummary, type SummaryItem } from '../reservation-summary';
 import { ReservationBottomBar } from '../reservation-bottom-bar';
 
 const DEFAULT_DURATION_MINUTES = 180;
 
-type Section = 'resource' | 'schedule' | 'availability' | 'details';
+type Section = 'resource' | 'schedule' | 'availability' | 'equipment' | 'details';
 
 function toVehicleCard(vehicle: Vehicle, imageSource: ImageSource | null): ResourceCardData {
   return {
@@ -121,6 +124,17 @@ export function VehicleReservationForm({ initialVehicleId, onSuccess }: VehicleR
     available: availability.data?.available,
   });
 
+  const equipment = useSlotEquipmentSelection({
+    resourceType: 'VEHICLE',
+    schedule,
+    scheduleValid: !scheduleIssue,
+  });
+
+  const changeEquipments = (next: EquipmentSelection) => {
+    if (submitError?.kind === 'equipment') clearSubmitError();
+    equipment.setSelection(next);
+  };
+
   const selectVehicle = (id: string) => {
     clearSubmitError();
     setValue('vehicleId', id, { shouldValidate: formState.isSubmitted });
@@ -153,7 +167,7 @@ export function VehicleReservationForm({ initialVehicleId, onSuccess }: VehicleR
       return;
     }
 
-    const reservation = await submit({
+    const { reservation, error } = await submit({
       resourceType: 'VEHICLE',
       vehicleId: form.vehicleId,
       startAt: combineDateAndTime(form.startDate, form.startTime),
@@ -162,6 +176,7 @@ export function VehicleReservationForm({ initialVehicleId, onSuccess }: VehicleR
       missionReason: form.missionReason.trim(),
       passengerCount: form.passengerCount,
       comment: form.comment?.trim() || undefined,
+      equipments: equipment.payload.length > 0 ? equipment.payload : undefined,
     });
     if (reservation) {
       onSuccess({
@@ -172,7 +187,7 @@ export function VehicleReservationForm({ initialVehicleId, onSuccess }: VehicleR
         scheduleLabel: formatScheduleRange(form),
       });
     } else {
-      scrollTo('availability');
+      scrollTo(error.kind === 'equipment' ? 'equipment' : 'availability');
     }
   };
 
@@ -210,6 +225,9 @@ export function VehicleReservationForm({ initialVehicleId, onSuccess }: VehicleR
       label: 'Passagers',
       value: pluralize(values.passengerCount ?? 1, 'passager', 'passagers'),
     },
+    equipment.summaryLines.length > 0
+      ? { key: 'equipments', icon: Package, label: 'Équipements', value: equipment.summaryLines.join('\n') }
+      : null,
   ].filter((item): item is SummaryItem => item !== null);
 
   return (
@@ -277,7 +295,25 @@ export function VehicleReservationForm({ initialVehicleId, onSuccess }: VehicleR
         />
       </FormSection>
 
-      <FormSection step={4} title="Votre déplacement" onLayout={register('details')}>
+      <FormSection
+        step={4}
+        title="Équipements"
+        description="Facultatif · matériel à prévoir pour ce déplacement"
+        onLayout={register('equipment')}
+      >
+        <EquipmentPicker
+          items={equipment.availability.data}
+          selection={equipment.selection}
+          onChange={changeEquipments}
+          isLoading={equipment.availability.isLoading}
+          isError={equipment.availability.isError}
+          onRetry={() => void equipment.availability.refetch()}
+          disabledMessage={scheduleIssue ? 'Choisissez une période valide pour voir les équipements disponibles.' : undefined}
+        />
+        {submitError?.kind === 'equipment' ? <EquipmentErrorNotice message={submitError.message} /> : null}
+      </FormSection>
+
+      <FormSection step={5} title="Votre déplacement" onLayout={register('details')}>
         <Controller
           control={control}
           name="destination"
@@ -350,7 +386,7 @@ export function VehicleReservationForm({ initialVehicleId, onSuccess }: VehicleR
         />
       </FormSection>
 
-      <FormSection step={5} title="Résumé">
+      <FormSection step={6} title="Résumé">
         <ReservationSummary
           items={summaryItems}
           emptyMessage="Sélectionnez un véhicule et un créneau."

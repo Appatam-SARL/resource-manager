@@ -12,6 +12,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatEventTimeRange, isEventInProgress } from '@/features/dashboard/lib/dashboard';
 import { RESOURCE_TYPE_LABELS } from '@/lib/format';
+import { getDisplayStatus } from '@/lib/status';
 import { cn } from 'cn';
 
 type DashboardTodayProps = {
@@ -54,34 +55,48 @@ export function DashboardToday({ events, now, isError, onRetry }: DashboardToday
       <ol className="px-2">
         {events.slice(0, VISIBLE_EVENTS).map((event) => {
           const inProgress = isEventInProgress(event, now);
+          const opaque = Boolean(event.opaque);
+          const subtitle = opaque
+            ? 'Créneau réservé'
+            : [event.requesterName, event.context].filter(Boolean).join(' · ') || event.title;
+          const body = (
+            <>
+              <div className="w-[88px] shrink-0">
+                <p className={cn('text-[13px] font-medium tabular-nums', inProgress ? 'text-primary' : 'text-foreground')}>
+                  {formatEventTimeRange(event, now)}
+                </p>
+                {inProgress ? (
+                  <p className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-primary">
+                    <span className="size-1.5 animate-pulse rounded-full bg-primary" aria-hidden />
+                    En cours
+                  </p>
+                ) : null}
+              </div>
+              <ResourceTypeIcon resourceType={event.resourceType} size="sm" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-foreground">
+                  {event.resourceName ?? RESOURCE_TYPE_LABELS[event.resourceType]}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
+              </div>
+              <StatusBadge
+                status={getDisplayStatus({ status: event.status, endAt: event.end }, now)}
+                className="hidden sm:inline-flex"
+              />
+            </>
+          );
           return (
             <li key={event.id}>
-              <Link
-                href={`/reservations/${event.id}`}
-                className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-              >
-                <div className="w-[88px] shrink-0">
-                  <p className={cn('text-[13px] font-medium tabular-nums', inProgress ? 'text-primary' : 'text-foreground')}>
-                    {formatEventTimeRange(event, now)}
-                  </p>
-                  {inProgress ? (
-                    <p className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-primary">
-                      <span className="size-1.5 animate-pulse rounded-full bg-primary" aria-hidden />
-                      En cours
-                    </p>
-                  ) : null}
-                </div>
-                <ResourceTypeIcon resourceType={event.resourceType} size="sm" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-foreground">
-                    {event.resourceName ?? RESOURCE_TYPE_LABELS[event.resourceType]}
-                  </p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {[event.requesterName, event.context].filter(Boolean).join(' · ') || event.title}
-                  </p>
-                </div>
-                <StatusBadge status={event.status} className="hidden sm:inline-flex" />
-              </Link>
+              {opaque ? (
+                <div className="flex items-center gap-3 rounded-lg px-3 py-2.5 opacity-80">{body}</div>
+              ) : (
+                <Link
+                  href={`/reservations/${event.id}`}
+                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                >
+                  {body}
+                </Link>
+              )}
             </li>
           );
         })}
@@ -97,7 +112,7 @@ export function DashboardToday({ events, now, isError, onRetry }: DashboardToday
   return (
     <Panel
       title="Aujourd’hui"
-      description="Planning de la journée dans votre périmètre"
+      description="Occupation Groupe du jour — détail selon votre périmètre"
       flush
       action={
         <Link href="/calendar" className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'text-muted-foreground')}>

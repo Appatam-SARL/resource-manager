@@ -15,7 +15,11 @@ export type ResourceCardData = {
   statusColor: string;
   /** Optional photo shown instead of the type icon. */
   imageSource?: ImageSource | null;
+  /** Short labels (e.g. fixed room equipment) shown as chips. */
+  tags?: string[];
 };
+
+const MAX_VISIBLE_TAGS = 3;
 
 export type SlotAvailability = 'available' | 'unavailable' | null;
 
@@ -47,7 +51,13 @@ export const ResourceCard = memo(function ResourceCard({
     <Pressable
       accessibilityRole="radio"
       accessibilityState={{ checked: selected }}
-      accessibilityLabel={[resource.title, resource.subtitle, resource.capacityLabel, status.label]
+      accessibilityLabel={[
+        resource.title,
+        resource.subtitle,
+        resource.capacityLabel,
+        resource.tags && resource.tags.length > 0 ? `Équipements : ${resource.tags.join(', ')}` : null,
+        status.label,
+      ]
         .filter(Boolean)
         .join(', ')}
       onPress={() => onSelect(resource.id)}
@@ -90,6 +100,23 @@ export const ResourceCard = memo(function ResourceCard({
           </Text>
         ) : null}
       </View>
+
+      {resource.tags && resource.tags.length > 0 ? (
+        <View style={styles.tags}>
+          {resource.tags.slice(0, MAX_VISIBLE_TAGS).map((tag) => (
+            <View key={tag} style={styles.tag}>
+              <Text style={styles.tagText} numberOfLines={1}>
+                {tag}
+              </Text>
+            </View>
+          ))}
+          {resource.tags.length > MAX_VISIBLE_TAGS ? (
+            <View style={styles.tag}>
+              <Text style={styles.tagText}>+{resource.tags.length - MAX_VISIBLE_TAGS}</Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
 
       <View style={styles.cardFooter}>
         <View style={styles.capacity}>
@@ -323,6 +350,26 @@ const styles = StyleSheet.create({
   },
   cardSubtitle: {
     fontSize: 13,
+    color: colors.textMuted,
+  },
+  tags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: -spacing.xs,
+  },
+  tag: {
+    maxWidth: '100%',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    backgroundColor: colors.background,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  tagText: {
+    fontSize: 11,
+    fontWeight: '600',
     color: colors.textMuted,
   },
   cardFooter: {

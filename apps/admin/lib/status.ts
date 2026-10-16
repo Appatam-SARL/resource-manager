@@ -44,6 +44,21 @@ export const STATUS_TONE_CLASSES: Record<StatusTone, { badge: string; dot: strin
   info: { badge: 'bg-info/10 text-info ring-info/20', dot: 'bg-info' },
 };
 
+/**
+ * Status shown to the user. An APPROVED reservation whose end is reached reads
+ * as COMPLETED right away, without waiting for the server job that persists it.
+ * Every other status (PENDING included) is shown as-is.
+ */
+export function getDisplayStatus(
+  reservation: { status: ReservationStatus; endAt: string },
+  now: Date,
+): ReservationStatus {
+  if (reservation.status === 'APPROVED' && new Date(reservation.endAt) <= now) {
+    return 'COMPLETED';
+  }
+  return reservation.status;
+}
+
 export function getStatusConfig(status: string): StatusConfig {
   return (
     STATUS_CONFIG[status as KnownStatus] ?? {

@@ -5,11 +5,15 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
@@ -26,7 +30,9 @@ import { CreateReservationDto } from './dto/create-reservation.dto.js';
 import { ExtendReservationDto } from './dto/extend-reservation.dto.js';
 import { ListReservationsQueryDto } from './dto/list-reservations-query.dto.js';
 import { RejectReservationDto } from './dto/reject-reservation.dto.js';
+import { ReplaceReservationEquipmentsDto } from './dto/replace-reservation-equipments.dto.js';
 import { UpdateReservationDto } from './dto/update-reservation.dto.js';
+import { ReservationCompletionInterceptor } from './reservation-completion.interceptor.js';
 import { ReservationsService } from './reservations.service.js';
 
 @ApiTags('Reservations')
@@ -47,6 +53,7 @@ export class ReservationsController {
   }
 
   @Get()
+  @UseInterceptors(ReservationCompletionInterceptor)
   @ApiOperation({
     summary: 'Lister les réservations (périmètre organisationnel)',
   })
@@ -69,6 +76,7 @@ export class ReservationsController {
   }
 
   @Get(':id')
+  @UseInterceptors(ReservationCompletionInterceptor)
   @ApiOperation({ summary: 'Détail d’une réservation' })
   @ApiOkResponse()
   findOne(
@@ -87,6 +95,27 @@ export class ReservationsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.reservationsService.update(id, dto, user);
+  }
+
+  @Put(':id/equipments')
+  @ApiOperation({
+    summary: 'Remplacer les équipements d’une réservation',
+    description:
+      'Réservation en attente ou approuvée dont la date de début n’est pas atteinte (heure serveur). ' +
+      'Réservé au demandeur ou à un responsable de son périmètre. Le stock est revérifié ; ' +
+      'une réservation approuvée le reste et les responsables sont notifiés.',
+  })
+  @ApiOkResponse()
+  @ApiBadRequestResponse({
+    description: 'Statut non modifiable, réservation commencée, équipement inactif ou incompatible.',
+  })
+  @ApiConflictResponse({ description: 'Stock insuffisant sur le créneau.' })
+  replaceEquipments(
+    @Param('id') id: string,
+    @Body() dto: ReplaceReservationEquipmentsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.reservationsService.replaceEquipments(id, dto, user);
   }
 
   @Post(':id/approve')
@@ -128,8 +157,17 @@ export class ReservationsController {
   }
 
   @Post(':id/cancel')
-  @ApiOperation({ summary: 'Annuler une réservation' })
+  @ApiOperation({
+    summary: 'Annuler une réservation',
+    description:
+      'Seule une réservation en attente ou approuvée dont la date de début n’est pas encore atteinte ' +
+      'peut être annulée, quel que soit le rôle (y compris administrateurs).',
+  })
   @ApiOkResponse()
+  @ApiBadRequestResponse({
+    description:
+      'Statut non annulable, ou date de début atteinte : « Impossible d’annuler une réservation dont la date de début est passée. »',
+  })
   cancel(
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedUser,

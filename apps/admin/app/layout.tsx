@@ -21,8 +21,9 @@ const fontMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Resource Manager — Admin',
+  title: 'SUZANG HUB — Admin',
   description: 'Administration des ressources du Groupe',
+  applicationName: 'SUZANG HUB',
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

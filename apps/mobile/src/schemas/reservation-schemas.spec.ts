@@ -3,10 +3,7 @@ import {
   validatePassengerCountAgainstSeats,
   vehicleReservationSchema,
 } from './vehicle-reservation-schema';
-import {
-  roomReservationSchema,
-  validateParticipantCountAgainstCapacity,
-} from './room-reservation-schema';
+import { MAX_PARTICIPANT_COUNT, roomReservationSchema } from './room-reservation-schema';
 
 describe('vehicleReservationSchema', () => {
   const valid = {
@@ -90,8 +87,17 @@ describe('roomReservationSchema', () => {
     ).toBe(false);
   });
 
-  it('signale un dépassement de capacité', () => {
-    expect(validateParticipantCountAgainstCapacity(12, 10)).toMatch(/participants/);
-    expect(validateParticipantCountAgainstCapacity(5, 10)).toBeNull();
+  it('ne limite pas les participants à la capacité de la salle', () => {
+    expect(roomReservationSchema.safeParse({ ...valid, participantCount: 30 }).success).toBe(true);
+    expect(
+      roomReservationSchema.safeParse({ ...valid, participantCount: MAX_PARTICIPANT_COUNT }).success,
+    ).toBe(true);
+  });
+
+  it('rejette moins de 1 participant ou plus que la borne technique', () => {
+    expect(roomReservationSchema.safeParse({ ...valid, participantCount: 0 }).success).toBe(false);
+    expect(
+      roomReservationSchema.safeParse({ ...valid, participantCount: MAX_PARTICIPANT_COUNT + 1 }).success,
+    ).toBe(false);
   });
 });

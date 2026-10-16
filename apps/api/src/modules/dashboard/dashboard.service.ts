@@ -1,8 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import { ReservationStatus, ResourceStatus, Role } from '@prisma/client';
+import { ReservationStatus, ResourceStatus, ResourceType, Role } from '@prisma/client';
 import { AccessScopeService } from '../../common/authorization/access-scope.service.js';
 import { PrismaService } from '../../database/prisma.service.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
+import { computeRoomUsageStats, roomUsageWindowStart } from './room-usage.js';
+
+/** Meetings that actually took place: validated, not cancelled nor rejected. */
+const ROOM_USAGE_STATUSES: ReservationStatus[] = [
+  ReservationStatus.APPROVED,
+  ReservationStatus.COMPLETED,
+];
 
 @Injectable()
 export class DashboardService {
@@ -16,6 +23,7 @@ export class DashboardService {
     const companyId = this.resolveResourceCompanyId(actor);
 
     const resourceCompanyFilter = companyId ? { companyId } : {};
+    const now = new Date();
 
     const [
       reservationsTotal,
@@ -25,6 +33,7 @@ export class DashboardService {
       vehiclesAvailable,
       roomsTotal,
       roomsAvailable,
+      roomUsageIntervals,
     ] = await this.prisma.$transaction([
       this.prisma.reservation.count({ where: reservationWhere }),
       this.prisma.reservation.count({
@@ -49,6 +58,25 @@ export class DashboardService {
           status: ResourceStatus.AVAILABLE,
         },
       }),
+      this.prisma.reservation.findMany({
+        where: {
+          AND: [
+            reservationWhere,
+            {
+              resourceType: ResourceType.ROOM,
+              status: { in: ROOM_USAGE_STATUSES },
+              endAt: { gt: roomUsageWindowStart(now), lte: now },
+            },
+          ],
+        },
+        select: {
+          startAt: true,
+          endAt: true,
+          companyId: true,
+          company: { select: { name: true } },
+          direction: { select: { id: true, name: true } },
+        },
+      }),
     ]);
 
     return {
@@ -70,6 +98,7 @@ export class DashboardService {
           available: roomsAvailable,
         },
       },
+      roomUsage: computeRoomUsageStats(roomUsageIntervals, now),
     };
   }
 
@@ -96,6 +125,13 @@ export class DashboardService {
           select: { id: true, firstName: true, lastName: true },
         },
         company: { select: { id: true, name: true } },
+        equipments: {
+          select: {
+            quantity: true,
+            equipment: { select: { id: true, name: true } },
+          },
+          orderBy: { equipment: { name: 'asc' } },
+        },
       },
       orderBy: { createdAt: 'desc' },
       take,

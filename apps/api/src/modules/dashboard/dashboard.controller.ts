@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, UseInterceptors } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -12,6 +12,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
+import { ReservationCompletionInterceptor } from '../reservations/reservation-completion.interceptor.js';
 import { DashboardService } from './dashboard.service.js';
 
 class DashboardReservationsQueryDto {
@@ -32,6 +33,7 @@ export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
   @Get('summary')
+  @UseInterceptors(ReservationCompletionInterceptor)
   @ApiOperation({
     summary: 'Résumé tableau de bord (scopé selon le rôle)',
   })
@@ -41,6 +43,7 @@ export class DashboardController {
   }
 
   @Get('reservations')
+  @UseInterceptors(ReservationCompletionInterceptor)
   @ApiOperation({
     summary: 'Réservations récentes du périmètre',
   })

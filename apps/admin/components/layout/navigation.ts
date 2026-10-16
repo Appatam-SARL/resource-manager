@@ -9,6 +9,7 @@ import {
   DoorOpen,
   GitBranch,
   LayoutDashboard,
+  Package,
   ScrollText,
   Users,
 } from 'lucide-react';
@@ -21,6 +22,7 @@ export const NAV_ICONS: Record<string, LucideIcon> = {
   '/calendar': CalendarDays,
   '/vehicles': Car,
   '/rooms': DoorOpen,
+  '/equipments': Package,
   '/group': Building,
   '/companies': Building2,
   '/directions': GitBranch,
@@ -31,7 +33,7 @@ export const NAV_ICONS: Record<string, LucideIcon> = {
 
 const SECTIONS: { id: string; label: string; hrefs: string[] }[] = [
   { id: 'overview', label: 'Vue d’ensemble', hrefs: ['/dashboard'] },
-  { id: 'operations', label: 'Opérations', hrefs: ['/reservations', '/calendar', '/vehicles', '/rooms'] },
+  { id: 'operations', label: 'Opérations', hrefs: ['/reservations', '/calendar', '/vehicles', '/rooms', '/equipments'] },
   { id: 'organization', label: 'Organisation', hrefs: ['/group', '/companies', '/directions', '/users'] },
   { id: 'system', label: 'Système', hrefs: ['/notifications', '/audit'] },
 ];

@@ -6,6 +6,7 @@ import {
 } from '@tanstack/react-query';
 import type {
   ListQueryParams,
+  ReservationEquipmentInput,
   ReservationStatus,
   ResourceType,
 } from '@resource-manager/types';
@@ -73,6 +74,7 @@ export type CreateReservationBody =
       missionReason: string;
       passengerCount: number;
       comment?: string;
+      equipments?: ReservationEquipmentInput[];
     }
   | {
       resourceType: 'ROOM';
@@ -82,6 +84,7 @@ export type CreateReservationBody =
       meetingSubject: string;
       participantCount: number;
       comment?: string;
+      equipments?: ReservationEquipmentInput[];
     };
 
 export function useCreateReservation() {
@@ -94,6 +97,7 @@ export function useCreateReservation() {
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       void queryClient.invalidateQueries({ queryKey: ['calendar'] });
       void queryClient.invalidateQueries({ queryKey: ['availability'] });
+      void queryClient.invalidateQueries({ queryKey: ['equipment-availability'] });
     },
   });
 }
@@ -124,6 +128,7 @@ export function useCancelReservation() {
       void queryClient.invalidateQueries({ queryKey: ['reservations', id] });
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       void queryClient.invalidateQueries({ queryKey: ['calendar'] });
+      void queryClient.invalidateQueries({ queryKey: ['equipment-availability'] });
     },
   });
 }

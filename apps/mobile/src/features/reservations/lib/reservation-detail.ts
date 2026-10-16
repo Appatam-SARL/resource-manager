@@ -1,7 +1,7 @@
 import { addMinutes, differenceInCalendarDays, differenceInMinutes, format, isSameYear } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import type { Reservation, ResourceStatus, Role } from '@resource-manager/types';
-import { AppError } from '@/lib/errors';
+import { AppError, EQUIPMENT_UNAVAILABLE_CODE } from '@/lib/errors';
 import { parseApiDate } from '@/lib/format';
 import { isOpenStatus } from './reservation-list';
 import { formatDuration } from './schedule';
@@ -68,8 +68,15 @@ function canActOnReservation(reservation: Pick<Reservation, 'userId'>, actor: Ac
   return actor.role !== 'EMPLOYEE' || actor.id === reservation.userId;
 }
 
-export function canCancelReservation(reservation: Pick<Reservation, 'status' | 'userId'>, actor: Actor): boolean {
-  return isOpenStatus(reservation.status) && canActOnReservation(reservation, actor);
+/** A reservation can no longer be cancelled once its start time is reached, whatever the role. */
+export function canCancelReservation(
+  reservation: Pick<Reservation, 'status' | 'userId' | 'startAt'>,
+  now: Date,
+  actor: Actor,
+): boolean {
+  if (!isOpenStatus(reservation.status)) return false;
+  if (parseApiDate(reservation.startAt) <= now) return false;
+  return canActOnReservation(reservation, actor);
 }
 
 export type ExtensionIneligibility = 'status' | 'ended' | 'resource' | 'permission';
@@ -162,6 +169,9 @@ export function getExtendError(error: unknown): { kind: 'conflict' | 'general'; 
   }
   switch (error.status) {
     case 409:
+      if (error.code === EQUIPMENT_UNAVAILABLE_CODE) {
+        return { kind: 'general', message: `${error.message} Retirez cet équipement ou choisissez une autre heure de fin.` };
+      }
       return {
         kind: 'conflict',
         message: 'La ressource n’est plus disponible sur cette période ou la réservation a changé. Choisissez une autre heure de fin.',
@@ -220,7 +230,11 @@ export function buildReservationHistory(
     case 'APPROVED':
       return [created, { key: 'approved', title: 'Demande approuvée', tone: 'done' }];
     case 'COMPLETED':
-      return [created, { key: 'completed', title: 'Réservation terminée', tone: 'done' }];
+      return [
+        created,
+        { key: 'approved', title: 'Demande approuvée', tone: 'done' },
+        { key: 'completed', title: 'Réservation terminée', tone: 'done' },
+      ];
     case 'REJECTED':
       return [
         created,

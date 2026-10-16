@@ -23,7 +23,8 @@ import {
 import { selectItems } from '@/lib/select-items';
 import { useCalendar } from '@/features/calendar/hooks/use-calendar';
 import { useCompaniesOptions } from '@/hooks/use-companies-options';
-import { getStatusConfig, STATUS_TONE_CLASSES } from '@/lib/status';
+import { useNow } from '@/hooks/use-now';
+import { getDisplayStatus, getStatusConfig, STATUS_TONE_CLASSES } from '@/lib/status';
 import { useAuth } from '@/providers/auth-provider';
 import { cn } from 'cn';
 
@@ -53,7 +54,7 @@ function initialCalendarView(): CalendarViewType {
   return window.matchMedia('(max-width: 767px)').matches ? 'timeGridDay' : 'dayGridMonth';
 }
 
-type EventMeta = { resourceName?: string; requesterName?: string };
+type EventMeta = { resourceName?: string; requesterName?: string | null; opaque?: boolean };
 
 function renderEventContent(arg: EventContentArg) {
   const meta = arg.event.extendedProps as EventMeta;
@@ -64,7 +65,9 @@ function renderEventContent(arg: EventContentArg) {
         {arg.timeText ? <span className="mr-1 text-muted-foreground tabular-nums">{arg.timeText}</span> : null}
         {label}
       </span>
-      {meta.requesterName && arg.view.type !== 'dayGridMonth' ? (
+      {meta.opaque && arg.view.type !== 'dayGridMonth' ? (
+        <span className="truncate text-[11px] text-muted-foreground">Créneau réservé</span>
+      ) : meta.requesterName && arg.view.type !== 'dayGridMonth' ? (
         <span className="truncate text-[11px] text-muted-foreground">{meta.requesterName}</span>
       ) : null}
     </div>
@@ -75,6 +78,7 @@ export function CalendarView() {
   const router = useRouter();
   const calendarRef = useRef<FullCalendar>(null);
   const { user } = useAuth();
+  const now = useNow();
   const isGroupAdmin = user?.role === 'GROUP_ADMIN';
   const companiesQuery = useCompaniesOptions(isGroupAdmin);
 
@@ -89,15 +93,23 @@ export function CalendarView() {
 
   const events = useMemo<EventInput[]>(
     () =>
-      (query.data ?? []).map((event) => ({
-        id: event.id,
-        title: event.title,
-        start: event.start,
-        end: event.end,
-        classNames: [`rm-event--${event.status.toLowerCase()}`],
-        extendedProps: { resourceName: event.resourceName, requesterName: event.requesterName },
-      })),
-    [query.data],
+      (query.data ?? []).map((event) => {
+        const opaque = Boolean(event.opaque);
+        const statusClass = `rm-event--${getDisplayStatus({ status: event.status, endAt: event.end }, now).toLowerCase()}`;
+        return {
+          id: event.id,
+          title: event.title,
+          start: event.start,
+          end: event.end,
+          classNames: opaque ? [statusClass, 'rm-event--opaque'] : [statusClass],
+          extendedProps: {
+            resourceName: event.resourceName,
+            requesterName: event.requesterName,
+            opaque,
+          },
+        };
+      }),
+    [query.data, now],
   );
 
   const handleDatesSet = (arg: DatesSetArg) => {
@@ -112,6 +124,8 @@ export function CalendarView() {
 
   const handleEventClick = (info: EventClickArg) => {
     info.jsEvent.preventDefault();
+    const meta = info.event.extendedProps as EventMeta;
+    if (meta.opaque) return;
     router.push(`/reservations/${info.event.id}`);
   };
 

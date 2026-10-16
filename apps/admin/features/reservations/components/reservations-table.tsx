@@ -13,6 +13,7 @@ import { ResourceTypeIcon } from '@/components/shared/resource-type-icon';
 import { StatusBadge } from '@/components/shared/status-badge';
 import { UserAvatar } from '@/components/shared/user-avatar';
 import { useReservationDecisions } from '@/features/reservations/hooks/use-reservation-decisions';
+import { useNow } from '@/hooks/use-now';
 import { formatReservationPeriod } from '@/features/reservations/lib/reservation-display';
 import {
   reservationResourceLabel,
@@ -23,6 +24,7 @@ import {
   canApproveOrReject,
   canCancelReservation,
 } from '@/lib/reservation-permissions';
+import { getDisplayStatus } from '@/lib/status';
 import { useAuth } from '@/providers/auth-provider';
 
 type ReservationsTableProps = {
@@ -76,6 +78,7 @@ export function ReservationsTable({
   hasActiveFilters = false,
 }: ReservationsTableProps) {
   const { user } = useAuth();
+  const now = useNow();
   const decisions = useReservationDecisions();
   const showCompany = user?.role === 'GROUP_ADMIN';
 
@@ -136,7 +139,7 @@ export function ReservationsTable({
     {
       id: 'status',
       header: 'Statut',
-      cell: (row) => <StatusBadge status={row.status} />,
+      cell: (row) => <StatusBadge status={getDisplayStatus(row, now)} />,
     },
   ];
 
@@ -169,7 +172,7 @@ export function ReservationsTable({
                 <p className="truncate text-xs text-muted-foreground">
                   {userDisplayName(row.user)} · {period.day} · {period.time}
                 </p>
-                <StatusBadge status={row.status} />
+                <StatusBadge status={getDisplayStatus(row, now)} />
               </div>
             </Link>
           );

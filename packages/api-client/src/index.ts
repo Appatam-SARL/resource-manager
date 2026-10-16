@@ -6,12 +6,15 @@ import type {
   Company,
   DashboardSummary,
   Direction,
+  Equipment,
+  EquipmentAvailability,
   Group,
   ListQueryParams,
   MeetingRoom,
   Notification,
   Paginated,
   Reservation,
+  ReservationEquipmentInput,
   User,
   Vehicle,
 } from '@resource-manager/types';
@@ -290,6 +293,46 @@ export function createApiClient(options: ApiClientOptions) {
         body: JSON.stringify(body),
       }),
 
+    getEquipments: (params?: ListQueryParams) =>
+      request<Paginated<Equipment>>(options, `/api/v1/equipments${toQuery(params)}`),
+
+    getEquipment: (id: string) =>
+      request<Equipment>(options, `/api/v1/equipments/${id}`),
+
+    getEquipmentAvailability: (params: {
+      resourceType: string;
+      startAt: string;
+      endAt: string;
+      excludeReservationId?: string;
+    }) =>
+      request<EquipmentAvailability[]>(
+        options,
+        `/api/v1/equipments/availability${toQuery(params)}`,
+      ),
+
+    createEquipment: (body: unknown) =>
+      request<Equipment>(options, '/api/v1/equipments', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+
+    updateEquipment: (id: string, body: unknown) =>
+      request<Equipment>(options, `/api/v1/equipments/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+
+    updateEquipmentStatus: (id: string, body: { status: string }) =>
+      request<Equipment>(options, `/api/v1/equipments/${id}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+
+    deleteEquipment: (id: string) =>
+      request<{ deleted: boolean; message: string }>(options, `/api/v1/equipments/${id}`, {
+        method: 'DELETE',
+      }),
+
     getReservations: (params?: ListQueryParams) =>
       request<Paginated<Reservation>>(
         options,
@@ -346,6 +389,15 @@ export function createApiClient(options: ApiClientOptions) {
     cancelReservation: (id: string) =>
       request<Reservation>(options, `/api/v1/reservations/${id}/cancel`, {
         method: 'POST',
+      }),
+
+    replaceReservationEquipments: (
+      id: string,
+      body: { equipments: ReservationEquipmentInput[] },
+    ) =>
+      request<Reservation>(options, `/api/v1/reservations/${id}/equipments`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
       }),
 
     getCalendar: (params?: ListQueryParams) =>

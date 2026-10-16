@@ -6,6 +6,7 @@ import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { RolesGuard } from './guards/roles.guard.js';
+import { PasswordResetService } from './services/password-reset.service.js';
 import { PasswordService } from './services/password.service.js';
 import { JwtStrategy } from './strategies/jwt.strategy.js';
 
@@ -29,6 +30,7 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
   providers: [
     AuthService,
     PasswordService,
+    PasswordResetService,
     JwtStrategy,
     JwtAuthGuard,
     RolesGuard,

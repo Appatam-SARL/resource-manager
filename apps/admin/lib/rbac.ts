@@ -41,6 +41,11 @@ export const MENU_ITEMS: NavItem[] = [
     label: 'Salles',
     roles: ['GROUP_ADMIN', 'COMPANY_ADMIN', 'MANAGER'],
   },
+  {
+    href: '/equipments',
+    label: 'Équipements',
+    roles: ['GROUP_ADMIN'],
+  },
   { href: '/reservations', label: 'Réservations' },
   { href: '/calendar', label: 'Calendrier' },
   { href: '/notifications', label: 'Notifications' },

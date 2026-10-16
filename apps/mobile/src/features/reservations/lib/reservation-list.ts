@@ -12,6 +12,7 @@ import {
 import { fr } from 'date-fns/locale';
 import type { Reservation, ReservationStatus } from '@resource-manager/types';
 import { parseApiDate } from '@/lib/format';
+import { getDisplayStatus } from './reservation-status';
 
 /** Display-only time buckets — never a business status. */
 export type TemporalSegment = 'upcoming' | 'active' | 'history';
@@ -77,6 +78,7 @@ export type ReservationListItem = {
   context: { kind: 'destination' | 'subject'; text: string } | null;
   requesterName: string | null;
   inProgress: boolean;
+  displayStatus: ReservationStatus;
 };
 
 export function toReservationListItem(
@@ -111,6 +113,7 @@ export function toReservationListItem(
         ? `${requester.firstName} ${requester.lastName}`.trim()
         : null,
     inProgress: isOpenStatus(reservation.status) && isInProgress(reservation, now),
+    displayStatus: getDisplayStatus(reservation, now),
   };
 }
 

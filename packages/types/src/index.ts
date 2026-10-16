@@ -8,6 +8,8 @@ export type UserStatus = 'ACTIVE' | 'INACTIVE';
 export type EntityStatus = 'ACTIVE' | 'INACTIVE';
 export type ResourceStatus = 'AVAILABLE' | 'MAINTENANCE' | 'OUT_OF_SERVICE';
 export type ResourceType = 'VEHICLE' | 'ROOM';
+/** Which reservations an equipment may be requested with. */
+export type EquipmentScope = 'ROOM' | 'VEHICLE' | 'BOTH';
 export type ReservationStatus =
   | 'PENDING'
   | 'APPROVED'
@@ -72,16 +74,27 @@ export type CalendarEvent = {
   end: string;
   status: ReservationStatus;
   resourceType: ResourceType;
-  resourceId: string;
-  companyId: string;
+  resourceId: string | null;
+  /**
+   * Requester company when the viewer may see the reservation detail.
+   * Null on opaque (out-of-scope) group occupancy slots.
+   */
+  companyId: string | null;
   /** "Toyota Corolla" or the room name. */
   resourceName?: string;
   /** Registration number or room location. */
   resourceDetail?: string | null;
-  /** Destination (vehicle) or meeting subject (room). */
+  /** Destination (vehicle) or meeting subject (room). Null when opaque. */
   context?: string | null;
-  userId?: string;
-  requesterName?: string;
+  /** Null when opaque. */
+  userId?: string | null;
+  /** Null when opaque. */
+  requesterName?: string | null;
+  /**
+   * True when the slot is visible for group occupancy but the viewer
+   * is outside the reservation scope (no requester / subject / detail link).
+   */
+  opaque?: boolean;
 };
 
 export type Group = {
@@ -168,9 +181,43 @@ export type MeetingRoom = {
   capacity: number;
   status: ResourceStatus;
   description: string | null;
+  /** Fixed, non-bookable features of the room. */
+  fixedEquipment: string[];
   createdAt: string;
   updatedAt: string;
   company?: CompanySummary;
+};
+
+/** Group-wide catalogue entry, administered by GROUP_ADMIN only. */
+export type Equipment = {
+  id: string;
+  name: string;
+  description: string | null;
+  quantity: number;
+  scope: EquipmentScope;
+  status: ResourceStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** Stock left on a slot: never exposes the reservations consuming it. */
+export type EquipmentAvailability = {
+  id: string;
+  name: string;
+  description: string | null;
+  scope: EquipmentScope;
+  quantity: number;
+  availableQuantity: number;
+};
+
+export type ReservationEquipment = {
+  quantity: number;
+  equipment: { id: string; name: string };
+};
+
+export type ReservationEquipmentInput = {
+  equipmentId: string;
+  quantity: number;
 };
 
 export type Reservation = {
@@ -220,6 +267,7 @@ export type Reservation = {
     companyId?: string;
     company?: CompanySummary;
   } | null;
+  equipments?: ReservationEquipment[];
 };
 
 export type Notification = {
@@ -263,6 +311,35 @@ export type DashboardSummary = {
     vehicles: { total: number; available: number };
     rooms: { total: number; available: number };
   };
+  /**
+   * Average booked duration of the room reservations (APPROVED / COMPLETED) of the scope
+   * that ended in the last `periodDays` days, and over the period just before.
+   */
+  roomUsage?: RoomUsageStats;
+};
+
+export type RoomUsagePeriod = {
+  averageMinutes: number | null;
+  reservationCount: number;
+};
+
+export type RoomUsageByDirection = {
+  /** null groups the requesters attached directly to their company. */
+  directionId: string | null;
+  directionName: string | null;
+  companyId: string;
+  companyName: string;
+  reservationCount: number;
+  totalMinutes: number;
+};
+
+export type RoomUsageStats = RoomUsagePeriod & {
+  periodDays: number;
+  previous: RoomUsagePeriod;
+  /** Booked minutes of the current period, all directions included. */
+  totalMinutes?: number;
+  /** Most room-consuming directions of the current period, by booked time. */
+  topDirections?: RoomUsageByDirection[];
 };
 
 export type ListQueryParams = Record<string, string | number | boolean | undefined | null>;

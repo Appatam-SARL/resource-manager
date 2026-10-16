@@ -55,6 +55,9 @@ export default function RoomDetailScreen() {
         <Row label="Capacité" value={String(room.capacity)} />
         {room.location ? <Row label="Lieu" value={room.location} /> : null}
         {room.company ? <Row label="Entreprise" value={room.company.name} /> : null}
+        {room.fixedEquipment?.length ? (
+          <Row label="Équipements fixes" value={room.fixedEquipment.join(' · ')} />
+        ) : null}
         {room.description ? <Row label="Description" value={room.description} /> : null}
       </Card>
 

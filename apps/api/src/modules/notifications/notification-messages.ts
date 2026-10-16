@@ -57,4 +57,16 @@ export const reservationNotificationMessages = {
     title: 'Réservation prolongée',
     body: `La réservation de ${resourceLabel} a été prolongée jusqu'au ${newEndLabel}.`,
   }),
+
+  equipmentUpdatedForOwner: (): NotificationContent => ({
+    type: NotificationType.RESERVATION_EQUIPMENT_UPDATED,
+    title: 'Équipements modifiés',
+    body: 'Les équipements de votre réservation ont été modifiés.',
+  }),
+
+  equipmentUpdatedForApprovers: (resourceLabel: string): NotificationContent => ({
+    type: NotificationType.RESERVATION_EQUIPMENT_UPDATED,
+    title: 'Équipements modifiés',
+    body: `Les équipements de la réservation approuvée de ${resourceLabel} ont été modifiés.`,
+  }),
 } as const;
